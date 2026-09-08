@@ -1,0 +1,86 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+*.pyo
+*.pdb
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example          # keep the example template
+
+# ── uv ────────────────────────────────────────────────────────────────────────
+uv.lock               # regeneratable — do NOT commit if you want reproducible builds
+                      # remove this line if you WANT to commit the lockfile
+.uv/
+
+# ── Distribution / packaging ───────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# ── Testing / coverage ────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.coverage
+
+# ── Jupyter ────────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Data files (large — use DVC or LFS instead) ───────────────────────────────
+data/synthetic/connectomes/
+data/processed/
+data/raw/
+*.csv
+!data/synthetic/generate_synthetic.py   # keep the generator script
+!neo4j/etl/load_csv.cypher             # keep the cypher loader
+
+# ── Model checkpoints (large binaries) ────────────────────────────────────────
+checkpoints/
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+*.json
+!pyproject.toml                         # not a log, keep it
+
+# ── PyTorch Geometric cache ───────────────────────────────────────────────────
+models/gnn/processed/
+models/gnn/raw/
+
+# ── OS / editors ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Docker volumes (neo4j data) ────────────────────────────────────────────────
+neo4j_data/
+neo4j_logs/
+neo4j_import/
+neo4j_plugins/
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+*.pem
+*.key
+secrets.yaml
+credentials.json

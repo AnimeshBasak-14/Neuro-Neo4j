@@ -1,0 +1,166 @@
+# ================================================================
+# Neuro-Neo4j — Central Configuration
+# Author: basakanimesh14
+# ================================================================
+
+project:
+  name: neuro-neo4j
+  author: basakanimesh14
+  version: "0.1.0"
+
+# --- Atlas ---
+atlas:
+  name: AAL-116
+  n_regions: 116
+  # Optional: path to CSV with columns [atlas_id, label, x, y, z]
+  coordinates_file: data/raw/aal116_coords.csv
+
+# --- Data Paths ---
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  synthetic_dir: data/synthetic
+  connectomes_dir: data/synthetic/connectomes
+  edge_list_file: data/processed/edge_list.csv
+  subject_metadata_file: data/processed/subjects.csv
+
+# --- Neo4j ---
+neo4j:
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: "neuro_password"
+  database: "neo4j"
+  import_dir: /var/lib/neo4j/import/data
+  max_connection_lifetime: 3600
+  max_connection_pool_size: 50
+
+# --- GDS ---
+gds:
+  graph_name: brain_connectome
+  node_label: BrainRegion
+  relationship_type: CONNECTED_TO
+  relationship_weight_property: weight
+  page_rank:
+    max_iterations: 20
+    damping_factor: 0.85
+    write_property: pageRank
+  degree:
+    write_property: degree
+  clustering:
+    write_property: clustering
+  betweenness:
+    write_property: betweenness
+
+# --- Preprocessing ---
+preprocessing:
+  correlation_threshold: 0.3       # Edges below this Pearson r are pruned
+  normalize_method: zscore         # zscore | minmax
+  regress_global_signal: true
+  motion_artifact_fd_threshold: 0.5  # Framewise Displacement threshold (mm)
+  absolute_value: false            # Use |r| for edge weights
+
+# --- Synthetic Data (AAL-116) ---
+synthetic:
+  n_subjects: 50
+  n_healthy: 25
+  n_diseased: 25
+  n_regions: 116
+  random_seed: 42
+  scanner_sites:
+    - site_A
+    - site_B
+    - site_C
+  age_range: [45, 80]
+  # Diseased connectivity perturbation
+  disease_inter_hemispheric_factor: 0.4  # reduces inter-hemispheric edges
+  disease_local_boost_factor: 1.3        # boosts local (same-lobe) edges
+  noise_std: 0.05                        # scanner site noise
+
+# --- Model Hyperparameters ---
+model:
+  in_channels: 5          # [degree, pageRank, clustering, betweenness, eigenvector]
+  hidden_channels: 64
+  num_gcn_layers: 2
+  num_gat_layers: 1
+  num_heads: 4             # GAT multi-head attention
+  dropout: 0.3
+  num_classes: 2           # 0=Healthy, 1=Diseased
+  use_batch_norm: true
+  use_residual: true
+
+# --- Training ---
+training:
+  epochs: 100
+  batch_size: 16
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  scheduler: cosine        # cosine | step | none
+  early_stopping_patience: 15
+  checkpoint_dir: checkpoints
+  best_model_filename: best_model.pt
+  log_dir: logs
+
+# --- Validation ---
+validation:
+  split_ratios: [0.70, 0.15, 0.15]  # train / val / test
+  split_seed: 42
+  stratify: true
+  stratify_col: Diagnosis
+  scanner_site_col: ScannerSite
+
+# --- Baselines ---
+baselines:
+  svm:
+    kernel: rbf
+    C: 1.0
+    gamma: scale
+    class_weight: balanced
+    probability: true
+  random_forest:
+    n_estimators: 200
+    max_depth: null
+    min_samples_split: 2
+    class_weight: balanced_subsample
+    random_state: 42
+  node2vec:
+    dimensions: 64
+    walk_length: 30
+    num_walks: 200
+    p: 1.0
+    q: 1.0
+    workers: 4
+    seed: 42
+    logistic_regression:
+      max_iter: 1000
+      class_weight: balanced
+
+# --- GNNExplainer ---
+explainer:
+  epochs: 200
+  lr: 0.01
+  edge_mask_threshold: 0.5
+  node_feat_mask: true
+  top_k_edges: 20
+  top_k_regions: 10
+
+# --- API ---
+api:
+  host: "0.0.0.0"
+  port: 8000
+  title: "Neuro-Neo4j Inference API"
+  description: >
+    GNN-based brain biomarker classification and explainability service.
+    Classifies fMRI connectomes as Healthy or Diseased, and surfaces
+    biomarker subgraphs via GNNExplainer for clinical review.
+  version: "0.1.0"
+  cors_origins: ["*"]
+
+# --- Monitoring ---
+monitoring:
+  f1_baseline: 0.80
+  drift_threshold: 0.05
+  monitor_interval_seconds: 3600
+  sliding_window_size: 100
+  retraining_min_new_samples: 20
+  log_file: logs/monitoring.log
+  drift_log_file: logs/drift.json

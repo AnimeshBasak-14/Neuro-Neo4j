@@ -1,0 +1,129 @@
+# ================================================================
+# Neuro-Neo4j — NVIDIA DGX Training Configuration
+# Target: NVIDIA DGX A100 (8× A100 80GB) or DGX H100 (8× H100 80GB)
+#
+# Usage (from lab machine with DGX access):
+#   torchrun --nproc_per_node=8 models/gnn/train_dgx.py \
+#            --config config/dgx_config.yaml
+#
+# IMPORTANT: DGX is for TRAINING and TESTING ONLY.
+#            The FastAPI serving endpoint runs on local hardware.
+#
+# Author: basakanimesh14
+# ================================================================
+
+project:
+  name: neuro-neo4j-dgx
+  author: basakanimesh14
+  version: "0.1.0"
+  hardware: DGX-A100
+
+# --- Atlas (same as base config) ---
+atlas:
+  name: AAL-116
+  n_regions: 116
+
+# --- Data Paths (adjust to DGX shared filesystem) ---
+data:
+  raw_dir: /data/neuro-neo4j/raw
+  processed_dir: /data/neuro-neo4j/processed
+  synthetic_dir: /data/neuro-neo4j/synthetic
+  connectomes_dir: /data/neuro-neo4j/synthetic/connectomes
+  edge_list_file: /data/neuro-neo4j/processed/edge_list.csv
+  subject_metadata_file: /data/neuro-neo4j/processed/subjects.csv
+
+# --- Neo4j (running on lab server, NOT on DGX) ---
+neo4j:
+  uri: "bolt://lab-server:7687"   # adjust to your lab Neo4j host
+  user: "neo4j"
+  password: "neuro_password"
+  database: "neo4j"
+
+# ================================================================
+# SCALED MODEL — Leveraging DGX A100 80GB VRAM
+# ================================================================
+model:
+  in_channels: 5                  # same: degree, pageRank, clustering, betweenness, eigenvector
+  hidden_channels: 256            # ↑ 64 → 256 (4× larger)
+  num_gcn_layers: 4               # ↑ 2 → 4 deeper feature hierarchy
+  num_gat_layers: 2               # ↑ 1 → 2 multi-scale attention
+  num_heads: 8                    # ↑ 4 → 8 finer attention granularity
+  dropout: 0.2                    # slightly reduced (bigger model, less regularisation needed)
+  num_classes: 2
+  use_batch_norm: true
+  use_residual: true
+  # MLP head: wider for richer representation
+  mlp_hidden: 128                 # hidden_channels//2 = 128
+
+# ================================================================
+# MULTI-GPU TRAINING — PyTorch DDP over 8× A100
+# ================================================================
+training:
+  epochs: 300                     # ↑ 100 → 300 (more capacity = needs more epochs)
+  batch_size: 64                  # ↑ 16 → 64 (8 GPUs × 8 per GPU)
+  learning_rate: 0.0005           # linear scaling rule: lr = base_lr × batch_size/16 = 0.001×4 → scale back with warmup
+  weight_decay: 0.00005
+  scheduler: cosine
+  warmup_epochs: 10               # warmup for large-batch stability
+  early_stopping_patience: 30     # more patience for scaled model
+  checkpoint_dir: /data/neuro-neo4j/checkpoints
+  best_model_filename: best_model_dgx.pt
+  log_dir: /data/neuro-neo4j/logs
+
+  # --- DDP settings ---
+  distributed: true
+  backend: nccl                   # NCCL for GPU-GPU communication (optimal on DGX NVLink)
+  num_gpus: 8                     # all 8 A100s
+  mixed_precision: bf16           # BF16 on A100/H100 (more stable than FP16, same speed)
+  gradient_clip: 1.0
+  accumulate_grad_batches: 1      # with 64 batch_size, no need for accumulation
+
+  # --- Advanced regularisation ---
+  label_smoothing: 0.1            # helps with small medical datasets
+  mixup_alpha: 0.2                # graph-level mixup augmentation
+
+# --- Validation (same split logic, stricter) ---
+validation:
+  split_ratios: [0.70, 0.15, 0.15]
+  split_seed: 42
+  stratify: true
+  stratify_col: Diagnosis
+  scanner_site_col: ScannerSite
+  # Cross-validation for clinical rigour
+  use_kfold: true
+  k_folds: 5
+  kfold_seed: 42
+
+# --- GNNExplainer (on DGX — can afford longer runs) ---
+explainer:
+  epochs: 1000                    # ↑ 200 → 1000 (better mask quality)
+  lr: 0.005
+  edge_mask_threshold: 0.5
+  node_feat_mask: true
+  top_k_edges: 30                 # ↑ 20 → 30
+  top_k_regions: 15
+
+# --- Monitoring (training metrics, written to shared FS) ---
+monitoring:
+  f1_baseline: 0.80
+  drift_threshold: 0.05
+  log_file: /data/neuro-neo4j/logs/monitoring.log
+  drift_log_file: /data/neuro-neo4j/logs/drift.json
+
+# ================================================================
+# DGX LAUNCH COMMANDS (reference)
+# ================================================================
+# Single-node, 8-GPU DDP:
+#   torchrun --standalone --nproc_per_node=8 \
+#            models/gnn/train_dgx.py --config config/dgx_config.yaml
+#
+# Check GPU utilisation:
+#   nvidia-smi dmon -s u
+#
+# Estimated training time (50 subjects, 300 epochs, 8×A100):
+#   < 5 minutes total  (dataset is tiny — DGX is massively over-provisioned)
+#   Use larger cohort or synthetic augmentation to justify DGX use.
+#
+# Recommended cohort size for DGX:
+#   500+ subjects for 8-GPU training to be worthwhile.
+# ================================================================

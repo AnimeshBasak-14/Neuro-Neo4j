@@ -1,0 +1,142 @@
+# ================================================================
+# Neuro-Neo4j — NVIDIA AGX Training + Testing Configuration
+# Target: NVIDIA AGX Orin (64GB unified memory) or AGX Xavier (32GB)
+#
+# Usage:
+#   python models/gnn/train.py --config config/agx_config.yaml
+#
+# IMPORTANT: AGX is for TRAINING and TESTING ONLY.
+#            FastAPI inference runs on local/clinical hardware.
+#            AGX has no separate CPU/GPU memory — unified memory!
+#
+# Author: basakanimesh14
+# ================================================================
+
+project:
+  name: neuro-neo4j-agx
+  author: basakanimesh14
+  version: "0.1.0"
+  hardware: AGX-Orin-64GB
+
+# --- Atlas ---
+atlas:
+  name: AAL-116
+  n_regions: 116
+
+# --- Data Paths (adjust to AGX local SSD) ---
+data:
+  raw_dir: /home/ubuntu/neuro-neo4j/data/raw
+  processed_dir: /home/ubuntu/neuro-neo4j/data/processed
+  synthetic_dir: /home/ubuntu/neuro-neo4j/data/synthetic
+  connectomes_dir: /home/ubuntu/neuro-neo4j/data/synthetic/connectomes
+  edge_list_file: /home/ubuntu/neuro-neo4j/data/processed/edge_list.csv
+  subject_metadata_file: /home/ubuntu/neuro-neo4j/data/processed/subjects.csv
+
+# --- Neo4j (running on lab server) ---
+neo4j:
+  uri: "bolt://lab-server:7687"
+  user: "neo4j"
+  password: "neuro_password"
+  database: "neo4j"
+
+# ================================================================
+# SCALED MODEL — Balanced for AGX Orin unified memory (64GB)
+# ================================================================
+# AGX Orin key constraints:
+#   - 64GB LPDDR5 unified memory (CPU+GPU share)
+#   - 2048 CUDA cores (Ampere)
+#   - 64 Tensor cores
+#   - Max batch_size limited by unified memory bandwidth
+# ================================================================
+model:
+  in_channels: 5
+  hidden_channels: 128            # ↑ 64 → 128 (2× base; AGX comfortable with this)
+  num_gcn_layers: 3               # ↑ 2 → 3
+  num_gat_layers: 1               # keep at 1 (memory-conservative)
+  num_heads: 4                    # same as base
+  dropout: 0.25
+  num_classes: 2
+  use_batch_norm: true
+  use_residual: true
+  mlp_hidden: 64
+
+# ================================================================
+# SINGLE-GPU TRAINING — AGX Orin (1 iGPU, Ampere)
+# ================================================================
+training:
+  epochs: 200                     # ↑ 100 → 200
+  batch_size: 32                  # ↑ 16 → 32 (AGX unified memory handles this well)
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  scheduler: cosine
+  warmup_epochs: 5
+  early_stopping_patience: 20
+  checkpoint_dir: /home/ubuntu/neuro-neo4j/checkpoints
+  best_model_filename: best_model_agx.pt
+  log_dir: /home/ubuntu/neuro-neo4j/logs
+
+  # --- AGX precision settings ---
+  distributed: false              # single GPU
+  num_gpus: 1
+  mixed_precision: fp16           # FP16 on Ampere (AGX doesn't support BF16 in JetPack 5.x)
+  gradient_clip: 1.0
+
+  # --- Memory management for unified architecture ---
+  pin_memory: false               # MUST be false on AGX (shared memory, pinning is counterproductive)
+  num_workers: 4                  # AGX Orin has 12-core ARM CPU
+  prefetch_factor: 2
+
+# --- Validation ---
+validation:
+  split_ratios: [0.70, 0.15, 0.15]
+  split_seed: 42
+  stratify: true
+  stratify_col: Diagnosis
+  scanner_site_col: ScannerSite
+
+# --- GNNExplainer (balanced for AGX speed) ---
+explainer:
+  epochs: 500
+  lr: 0.01
+  edge_mask_threshold: 0.5
+  node_feat_mask: true
+  top_k_edges: 20
+  top_k_regions: 10
+
+# --- Monitoring ---
+monitoring:
+  f1_baseline: 0.80
+  drift_threshold: 0.05
+  log_file: /home/ubuntu/neuro-neo4j/logs/monitoring.log
+  drift_log_file: /home/ubuntu/neuro-neo4j/logs/drift.json
+
+# ================================================================
+# AGX SETUP COMMANDS (reference — JetPack 5.x / 6.x)
+# ================================================================
+# 1. Check available memory:
+#      tegrastats
+#
+# 2. Set max power mode for training:
+#      sudo nvpmodel -m 0      # MAXN mode (all cores, max clocks)
+#      sudo jetson_clocks       # lock clocks at max
+#
+# 3. Install PyTorch for Jetson (JetPack 5.x):
+#      pip3 install torch torchvision torchaudio \
+#        --index-url https://developer.download.nvidia.com/compute/redist/jp/v512
+#
+# 4. Verify CUDA on AGX:
+#      python3 -c "import torch; print(torch.cuda.is_available())"
+#
+# 5. Run training:
+#      python models/gnn/train.py --config config/agx_config.yaml
+#
+# 6. Monitor GPU during training:
+#      watch -n1 tegrastats
+#
+# Estimated training time (50 subjects, 200 epochs, AGX Orin):
+#   ~15–30 minutes (unified memory bandwidth is the bottleneck for
+#   small graphs, not compute)
+#
+# NOTE: Export checkpoint to ONNX for deployment on clinical hardware:
+#   torch.onnx.export(model, dummy_input, "model.onnx", ...)
+# ================================================================
