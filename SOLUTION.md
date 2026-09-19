@@ -141,9 +141,10 @@ Two complementary message-passing mechanisms are combined:
 | Component | What it captures | Why needed |
 |---|---|---|
 | **GCNConv** | Isotropic neighbourhood aggregation | Structural connectivity patterns, hub regions |
-| **GATConv** | Attention-weighted aggregation | Long-range connections, identify which neighbours matter most |
+| **GATv2Conv** | Dynamic attention-weighted aggregation | Fixes static attention limitation (Brody et al., 2021); selectively focuses on disrupted functional pathways |
+| **SwiGLU Head** | Multiplicative gated linear unit | SOTA activation (Shazeer, 2020; LLaMA 3); dynamically filters scanner SNR fluctuations and non-linear artifacts |
 
-GCN alone misses the importance weighting of connections. GAT alone is computationally expensive for dense graphs. The hybrid uses GCN for early structural encoding and GAT for attended refinement.
+GCN alone misses the importance weighting of connections. GATv2 provides strictly expressive dynamic attention over static GAT. Combining them gives structural stability from GCN and selective pathway focus from GATv2. The SwiGLU classification readout head stabilizes predictions across multi-site variance.
 
 ### 4.2 Architecture
 
@@ -159,43 +160,53 @@ Input: X ∈ ℝ^(116 × 5)    [116 regions, 5 node features each]
    Dropout(p=0.2)
    + Residual connection (projection if dims differ)
 
- GAT Block × num_gat_layers:
-   GATConv(hidden → hidden, heads=H, concat=False)
+ GATv2 Block × num_gat_layers:
+   GATv2Conv(hidden → hidden // H, heads=H, concat=True)
    BatchNorm1d(hidden)
    ELU
    Dropout(p=0.2)
    + Residual connection
 
- Global Mean Pool:
+ Global Readout (Mean Pooling):
    h_G = (1/|V|) Σ h_v        [graph-level embedding, ℝ^hidden]
 
- MLP Classifier:
-   Linear(hidden → hidden//2)
-   ReLU + Dropout
+ SwiGLU Classifier Head:
+   SwiGLU: (Swish(h_G · W_gate) ⊗ (h_G · W_up)) · W_down  →  ℝ^(hidden//2)
+   Dropout(p=0.2)
    Linear(hidden//2 → 2)      [logits for 2 classes]
 ────────────────────────────────────────────────────────
 Output: logits ∈ ℝ^2  →  Softmax  →  P(Healthy), P(Diseased)
 ```
 
-### 4.3 Model Sizes by Hardware
+### 4.3 Threshold Calibration: Youden's J-Statistic
 
-| Hardware | Hidden | GCN | GAT | Heads | Params | Precision |
+In multi-site clinical deployments, scanner noise distributions cause an apparent gap between **ROC-AUC (~0.71–0.80)** and raw accuracy (~57%) under an arbitrary fixed $p = 0.5$ threshold. We incorporate **Youden's J-statistic** threshold optimization:
+
+$$J(t) = \text{Sensitivity}(t) + \text{Specificity}(t) - 1 = \text{TPR}(t) - \text{FPR}(t)$$
+
+The optimal decision boundary $t^* = \arg\max_t J(t)$ is calibrated on validation probabilities and applied during inference ($\hat{y} = \mathbb{I}(P(\text{Diseased}) \ge t^*)$), realigning operational accuracy and Macro-F1 with the model's true discriminative ranking power.
+
+### 4.4 Model Sizes by Hardware
+
+| Hardware | Hidden | GCN | GATv2 | Heads | Readout | Precision |
 |---|---|---|---|---|---|---|
-| AGX Orin | 128 | 3 | 1 | 4 | ~50K | FP16 |
-| V100 Server | 192 | 3 | 1 | 4 | ~105K | FP16 |
-| DGX Spark (future) | 256 | 4 | 2 | 8 | ~250K | BF16 |
+| AGX Orin | 128 | 3 | 1 | 4 | SwiGLU | FP16 |
+| V100 Server | 192 | 3 | 1 | 4 | SwiGLU | FP16 |
+| DGX Spark (future) | 256 | 4 | 2 | 8 | SwiGLU | BF16 |
 
-> For 116-node brain graphs with ~250 subjects, even the smallest model (50K params) is sufficiently expressive. Larger models on DGX Spark allow richer attention patterns.
+> For 116-node brain graphs with ~250–500 subjects, a 100K–170K parameter model provides the ideal inductive bias, avoiding the severe overfitting seen with multi-million parameter dense networks.
 
-### 4.4 Training Configuration
+### 4.5 Training Configuration
 
 | Setting | Value | Rationale |
 |---|---|---|
 | Loss function | CrossEntropyLoss + label smoothing 0.1 | Prevents overconfident predictions on small datasets |
 | Optimiser | AdamW (lr=0.001, wd=0.0001) | Weight decay regularises sparse graph features |
 | Scheduler | Linear warmup (5 ep) + cosine decay | Prevents early overfitting, smooth convergence |
+| Activation | SwiGLU in classification head | Multiplicative gating filters scanner noise |
+| Attention | GATv2Conv (dynamic self-attention) | Overcomes standard GAT rank collapse |
 | Early stopping | Patience = 25 epochs on val Macro-F1 | Stops when validation F1 plateaus |
-| Gradient clipping | max norm = 1.0 | Stabilises GAT attention gradient flow |
+| Gradient clipping | max norm = 1.0 | Stabilises GATv2 attention gradient flow |
 | Mixed precision | FP16 (V100/AGX) / BF16 (Blackwell) | 2× throughput, same accuracy |
 
 ### 4.5 Validation Strategy

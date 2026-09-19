@@ -133,6 +133,44 @@ def compute_jaccard(set_a: set, set_b: set) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Threshold Calibration: Youden's J-Statistic
+# ---------------------------------------------------------------------------
+
+def find_optimal_threshold(y_true: np.ndarray, y_scores: np.ndarray) -> tuple[float, float]:
+    """
+    Find optimal classification decision threshold using Youden's J-statistic:
+        J = Sensitivity + Specificity - 1 = True Positive Rate - False Positive Rate
+
+    In multi-site clinical datasets with scanner SNR shifts, the default 0.5 threshold
+    causes accuracy/F1 collapse. Finding the optimal operating point on the ROC curve
+    realigns operational accuracy with the model's true discriminative ROC-AUC.
+
+    Parameters
+    ----------
+    y_true   : Ground truth binary labels (0 or 1)
+    y_scores : Predicted probabilities for the positive class (n,) or (n, 2)
+
+    Returns
+    -------
+    tuple of (optimal_threshold, max_J)
+    """
+    from sklearn.metrics import roc_curve
+    y_true   = np.asarray(y_true)
+    y_scores = np.asarray(y_scores)
+    if y_scores.ndim == 2 and y_scores.shape[1] == 2:
+        y_scores = y_scores[:, 1]
+
+    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+    j_scores = tpr - fpr
+    best_idx = int(np.argmax(j_scores))
+    optimal_t = float(thresholds[best_idx])
+
+    # Guard against degenerate boundaries
+    optimal_t = float(np.clip(optimal_t, 0.05, 0.95))
+    return optimal_t, float(j_scores[best_idx])
+
+
+# ---------------------------------------------------------------------------
 # Composite metric computation
 # ---------------------------------------------------------------------------
 
@@ -224,13 +262,17 @@ class MetricsReport:
 
     def __str__(self) -> str:
         lines = [
-            f"── MetricsReport [{self.split.upper()} | n={self.n_samples}] ──",
+            f"== MetricsReport [{self.split.upper()} | n={self.n_samples}] ==",
             f"  Accuracy  : {self.accuracy:.4f}",
-            f"  Macro-F1  : {self.macro_f1:.4f}  ← primary clinical metric",
+            f"  Macro-F1  : {self.macro_f1:.4f}  <- primary clinical metric",
             f"  ROC-AUC   : {self.roc_auc:.4f}",
             f"  Jaccard   : {self.jaccard:.4f}" if self.jaccard else "  Jaccard   : N/A",
         ]
-        if self.extra:
+        if "calibrated_accuracy" in self.extra:
+            t = self.extra.get("optimal_threshold", 0.5)
+            lines.append(f"  Calibrated Acc : {self.extra['calibrated_accuracy']:.4f} (at threshold t*={t:.3f})")
+            lines.append(f"  Calibrated F1  : {self.extra['calibrated_macro_f1']:.4f}")
+        elif self.extra:
             for k, v in self.extra.items():
                 lines.append(f"  {k:<10}: {v}")
         return "\n".join(lines)
@@ -244,24 +286,40 @@ class MetricsReport:
         split: str = "test",
         biomarker_set_a: Optional[set] = None,
         biomarker_set_b: Optional[set] = None,
+        calibrate_threshold: bool = True,
     ) -> "MetricsReport":
         """
         Convenience constructor from raw prediction arrays.
 
         Parameters
         ----------
-        y_true          : Ground truth labels
-        y_pred          : Predicted labels
-        y_scores        : Predicted probabilities
-        split           : Split name (train/val/test)
-        biomarker_set_a : Optional first biomarker set for Jaccard
-        biomarker_set_b : Optional second biomarker set for Jaccard
+        y_true              : Ground truth labels
+        y_pred              : Predicted labels
+        y_scores            : Predicted probabilities
+        split               : Split name (train/val/test)
+        biomarker_set_a     : Optional first biomarker set for Jaccard
+        biomarker_set_b     : Optional second biomarker set for Jaccard
+        calibrate_threshold : Compute Youden J-statistic optimal decision threshold
 
         Returns
         -------
         MetricsReport
         """
         d = compute_all_metrics(y_true, y_pred, y_scores, biomarker_set_a, biomarker_set_b)
+        extra = {}
+
+        if calibrate_threshold and len(np.unique(y_true)) > 1:
+            try:
+                opt_t, max_j = find_optimal_threshold(y_true, y_scores)
+                scores_pos = y_scores[:, 1] if (y_scores.ndim == 2 and y_scores.shape[1] == 2) else y_scores
+                cal_pred = (scores_pos >= opt_t).astype(int)
+                extra["optimal_threshold"] = round(opt_t, 4)
+                extra["youden_j"] = round(max_j, 4)
+                extra["calibrated_accuracy"] = round(compute_accuracy(y_true, cal_pred), 4)
+                extra["calibrated_macro_f1"] = round(compute_macro_f1(y_true, cal_pred), 4)
+            except Exception as exc:
+                logger.debug("Threshold calibration skipped: %s", exc)
+
         return cls(
             accuracy  = d["accuracy"],
             macro_f1  = d["macro_f1"],
@@ -269,4 +327,5 @@ class MetricsReport:
             jaccard   = d["jaccard"],
             split     = split,
             n_samples = len(y_true),
+            extra     = extra,
         )

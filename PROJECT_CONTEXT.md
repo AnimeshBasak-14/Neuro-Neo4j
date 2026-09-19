@@ -37,8 +37,9 @@ fMRI Connectomes (116x116 Pearson Correlation)
 ┌─────────────────────────────────────────────────────────────┐
 │ 2. Deep Learning Layer: PyTorch Geometric (PyG 2.8)         │
 │    - BrainConnectomeDataset: Graph-level data pipeline      │
-│    - BrainGNNModel: 2x GCN + 1x GAT (4 heads) + Residuals   │
-│    - Global Mean Pooling -> 2-layer MLP Classifier          │
+│    - BrainGNNModel: GCN + GATv2 (dynamic attention, 4 heads)│
+│    - Global Readout -> SwiGLU Gated Feed-Forward Head       │
+│    - Threshold calibration via Youden's J-statistic         │
 └───────────────────────────┬─────────────────────────────────┘
                             │
                             ▼

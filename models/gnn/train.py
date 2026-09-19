@@ -281,6 +281,9 @@ class GNNTrainer:
         )
         logger.info("Evaluation [%s] — Acc=%.4f | Macro-F1=%.4f | ROC-AUC=%.4f",
                     split, report.accuracy, report.macro_f1, report.roc_auc)
+        if "calibrated_accuracy" in report.extra:
+            logger.info("Calibrated [%s] — Acc=%.4f | Macro-F1=%.4f (threshold t*=%.3f)",
+                        split, report.extra["calibrated_accuracy"], report.extra["calibrated_macro_f1"], report.extra["optimal_threshold"])
         return report
 
     # ------------------------------------------------------------------
