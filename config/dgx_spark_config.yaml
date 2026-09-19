@@ -1,0 +1,131 @@
+# ================================================================
+# Neuro-Neo4j — NVIDIA DGX Spark Configuration
+# Target: NVIDIA GB10 Grace Blackwell Superchip (128 GB unified)
+#
+# DGX Spark specs:
+#   - GB10: 20 Blackwell GPU cores + 72-core Grace ARM CPU
+#   - 128 GB LPDDR5X unified memory (CPU+GPU share via NVLink-C2C)
+#   - 1 petaFLOP AI (FP4), 67 TFLOPS (FP16)
+#   - NVLink-C2C at 900 GB/s bandwidth
+#   - JetPack 6.x / CUDA 12.6+
+#
+# Usage:
+#   python scripts/train_launcher.py --config config/dgx_spark_config.yaml
+#
+# IMPORTANT: DGX Spark is for TRAINING and TESTING ONLY.
+#            FastAPI inference runs on separate clinical hardware.
+#
+# Author: basakanimesh14
+# ================================================================
+
+project:
+  name: neuro-neo4j-dgx-spark
+  author: basakanimesh14
+  version: "0.1.0"
+  hardware: DGX-Spark-GB10
+
+atlas:
+  name: AAL-116
+  n_regions: 116
+
+data:
+  raw_dir: /home/ubuntu/neuro-neo4j/data/raw
+  processed_dir: /home/ubuntu/neuro-neo4j/data/processed
+  synthetic_dir: /home/ubuntu/neuro-neo4j/data/synthetic
+  connectomes_dir: /home/ubuntu/neuro-neo4j/data/synthetic/connectomes
+  edge_list_file: /home/ubuntu/neuro-neo4j/data/processed/edge_list.csv
+  subject_metadata_file: /home/ubuntu/neuro-neo4j/data/processed/subjects.csv
+  n_synthetic_subjects: 500          # scale up for meaningful training
+
+neo4j:
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: "neuro_password"
+  database: "neo4j"
+
+# ================================================================
+# SCALED MODEL — Blackwell GB10 (128 GB unified, NVLink-C2C)
+# ================================================================
+# Blackwell advantages used here:
+#   - BF16 training (numerically stable, same speed as FP16)
+#   - Large unified memory → bigger batch & model than AGX Orin
+#   - No PCIe bottleneck (NVLink-C2C at 900 GB/s)
+# ================================================================
+model:
+  in_channels: 5
+  hidden_channels: 256             # max practical for 116-node graphs
+  num_gcn_layers: 4
+  num_gat_layers: 2
+  num_heads: 8
+  dropout: 0.2
+  num_classes: 2
+  use_batch_norm: true
+  use_residual: true
+  mlp_hidden: 128
+
+training:
+  epochs: 300
+  batch_size: 64                   # DGX Spark can handle large batches
+  learning_rate: 0.0005
+  weight_decay: 0.00005
+  scheduler: cosine
+  warmup_epochs: 10
+  early_stopping_patience: 40
+  checkpoint_dir: /home/ubuntu/neuro-neo4j/checkpoints
+  best_model_filename: best_model_dgx_spark.pt
+  log_dir: /home/ubuntu/neuro-neo4j/logs
+
+  # --- Blackwell precision ---
+  distributed: false               # DGX Spark = 1 chip (no DDP needed)
+  num_gpus: 1
+  mixed_precision: bf16            # Blackwell 5th-gen Tensor Cores: BF16 optimal
+  gradient_clip: 1.0
+  label_smoothing: 0.1
+
+  # --- DataLoader tuning for unified memory (no NUMA penalty) ---
+  pin_memory: false                # Unified memory — pinning is counterproductive
+  num_workers: 8                   # 72-core Grace ARM CPU
+  prefetch_factor: 4
+
+validation:
+  split_ratios: [0.70, 0.15, 0.15]
+  split_seed: 42
+  stratify: true
+  stratify_col: Diagnosis
+  scanner_site_col: ScannerSite
+  use_kfold: true
+  k_folds: 5
+  kfold_seed: 42
+
+explainer:
+  epochs: 1000
+  lr: 0.005
+  edge_mask_threshold: 0.5
+  node_feat_mask: true
+  top_k_edges: 30
+  top_k_regions: 15
+
+monitoring:
+  f1_baseline: 0.80
+  drift_threshold: 0.05
+  log_file: /home/ubuntu/neuro-neo4j/logs/monitoring.log
+  drift_log_file: /home/ubuntu/neuro-neo4j/logs/drift.json
+
+# ================================================================
+# DGX SPARK SETUP (JetPack 6.x)
+# ================================================================
+# 1. Check GPU available:
+#      python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+#
+# 2. Install for Blackwell (JetPack 6):
+#      pip3 install torch --index-url https://developer.download.nvidia.com/compute/redist/jp/v60
+#
+# 3. Set max performance:
+#      sudo nvpmodel -m 0 && sudo jetson_clocks
+#
+# 4. Monitor during training:
+#      tegrastats --interval 1000
+#
+# Estimated training time (500 subjects, 300 epochs):
+#   ~10–20 minutes on DGX Spark (depends on graph density)
+# ================================================================

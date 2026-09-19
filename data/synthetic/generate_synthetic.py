@@ -294,6 +294,40 @@ def generate_dataset(
 
 
 # ---------------------------------------------------------------------------
+# Convenience wrapper for train_launcher.py
+# ---------------------------------------------------------------------------
+
+def make_connectome(
+    diagnosis:    str,
+    scanner_site: str,
+    seed:         int,
+    n_regions:    int = 116,
+) -> np.ndarray:
+    """
+    Seed-based wrapper around generate_subject_connectome.
+
+    Parameters
+    ----------
+    diagnosis    : 'Healthy' or 'Diseased'
+    scanner_site : e.g. 'site_A'
+    seed         : Integer seed for reproducibility
+    n_regions    : 116 for AAL-116
+
+    Returns
+    -------
+    np.ndarray  (n_regions × n_regions) symmetric correlation matrix
+    """
+    rng = np.random.default_rng(seed)
+    return generate_subject_connectome(
+        subject_id=f"sub_{seed:04d}",
+        diagnosis=diagnosis,
+        site=scanner_site,
+        rng=rng,
+        n_regions=n_regions,
+    )
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 

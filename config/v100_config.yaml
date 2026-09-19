@@ -1,0 +1,140 @@
+# ================================================================
+# Neuro-Neo4j — NVIDIA V100 Server Configuration
+# Target: Tesla V100 (16 GB or 32 GB VRAM, Volta architecture)
+#
+# V100 constraints vs newer hardware:
+#   - FP16 ONLY (no BF16 — Volta predates BF16 support)
+#   - 16 GB or 32 GB dedicated VRAM (not unified)
+#   - No NVLink-C2C — standard PCIe or NVSwitch (multi-GPU server)
+#   - pin_memory=True is beneficial (dedicated VRAM, separate CPU RAM)
+#
+# Multi-GPU on V100 server:
+#   If server has multiple V100s, use DDP (uncomment distributed=true)
+#   torchrun --standalone --nproc_per_node=<N_V100s> \
+#            scripts/train_launcher.py --config config/v100_config.yaml
+#
+# Usage (single V100):
+#   python scripts/train_launcher.py --config config/v100_config.yaml
+#
+# IMPORTANT: V100 is for TRAINING and TESTING ONLY.
+#
+# Author: basakanimesh14
+# ================================================================
+
+project:
+  name: neuro-neo4j-v100
+  author: basakanimesh14
+  version: "0.1.0"
+  hardware: Tesla-V100
+
+atlas:
+  name: AAL-116
+  n_regions: 116
+
+data:
+  raw_dir: /data/neuro-neo4j/raw
+  processed_dir: /data/neuro-neo4j/processed
+  synthetic_dir: /data/neuro-neo4j/synthetic
+  connectomes_dir: /data/neuro-neo4j/synthetic/connectomes
+  edge_list_file: /data/neuro-neo4j/processed/edge_list.csv
+  subject_metadata_file: /data/neuro-neo4j/processed/subjects.csv
+  n_synthetic_subjects: 500
+
+neo4j:
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: "neuro_password"
+  database: "neo4j"
+
+# ================================================================
+# MODEL — Conservative for V100 16 GB (safe), large for V100 32 GB
+# ================================================================
+model:
+  in_channels: 5
+  hidden_channels: 192             # balanced: 128 for 16 GB, 192 for 32 GB
+  num_gcn_layers: 3
+  num_gat_layers: 1
+  num_heads: 4
+  dropout: 0.25
+  num_classes: 2
+  use_batch_norm: true
+  use_residual: true
+  mlp_hidden: 96
+
+training:
+  epochs: 200
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  scheduler: cosine
+  warmup_epochs: 5
+  early_stopping_patience: 25
+  checkpoint_dir: /data/neuro-neo4j/checkpoints
+  best_model_filename: best_model_v100.pt
+  log_dir: /data/neuro-neo4j/logs
+
+  # --- V100 precision: FP16 ONLY (Volta has no BF16) ---
+  distributed: false               # Set true + torchrun for multi-V100
+  num_gpus: 1                      # Increase if server has multiple V100s
+  mixed_precision: fp16            # CRITICAL: must be fp16, NOT bf16 on Volta
+  gradient_clip: 1.0
+  label_smoothing: 0.1
+
+  # --- DataLoader: dedicated VRAM → pin_memory=True is beneficial ---
+  pin_memory: true                 # Unlike AGX/DGX Spark, V100 has separate memory
+  num_workers: 8                   # Adjust to server CPU core count
+  prefetch_factor: 2
+
+  # --- FP16 stability workarounds (Volta-specific) ---
+  # GradScaler is enabled automatically when mixed_precision=fp16
+  # loss_scale: dynamic            # Handled by torch.cuda.amp.GradScaler
+
+validation:
+  split_ratios: [0.70, 0.15, 0.15]
+  split_seed: 42
+  stratify: true
+  stratify_col: Diagnosis
+  scanner_site_col: ScannerSite
+  use_kfold: true
+  k_folds: 5
+  kfold_seed: 42
+
+explainer:
+  epochs: 500
+  lr: 0.01
+  edge_mask_threshold: 0.5
+  node_feat_mask: true
+  top_k_edges: 20
+  top_k_regions: 10
+
+monitoring:
+  f1_baseline: 0.80
+  drift_threshold: 0.05
+  log_file: /data/neuro-neo4j/logs/monitoring.log
+  drift_log_file: /data/neuro-neo4j/logs/drift.json
+
+# ================================================================
+# V100 SERVER SETUP
+# ================================================================
+# 1. Verify CUDA + V100:
+#      nvidia-smi
+#      python3 -c "import torch; print(torch.version.cuda, torch.cuda.get_device_name(0))"
+#
+# 2. Install (standard CUDA 12.x wheel):
+#      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#      pip install torch-geometric
+#
+# 3. Single V100 training:
+#      python scripts/train_launcher.py --config config/v100_config.yaml
+#
+# 4. Multi-V100 DDP (if server has e.g. 4× V100):
+#      torchrun --standalone --nproc_per_node=4 \
+#               scripts/train_launcher.py --config config/v100_config.yaml --ddp
+#
+# 5. Monitor VRAM usage:
+#      watch -n1 nvidia-smi
+#
+# Estimated training time (500 subjects, 200 epochs):
+#   ~15–25 minutes on 1× V100 32 GB
+#   ~5–8  minutes on 4× V100 32 GB (DDP)
+# ================================================================
