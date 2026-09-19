@@ -145,21 +145,24 @@
 ### Q17: On the held-out test set, ROC-AUC was ~0.713 but Accuracy was ~57%. Why the gap, and how did you fix it?
 > **Answer:** "Default accuracy uses an uncalibrated $p = 0.5$ threshold. Multi-site scanner variance shifts the predicted probability distribution. The high ROC-AUC of 0.713 proves the model ranks patients correctly. We applied **Youden's J-statistic** ($J = \text{TPR} - \text{FPR}$) on validation predictions to find the optimal decision boundary $t^*$, which realigns operational accuracy and Macro-F1 with the true 71%+ discriminative AUC."
 
-### Q18: How do your empirical results from GATv1 compare to GATv2 + SwiGLU?
-> **Answer:** "Our baseline empirical run on the Tesla V100 with GATv1 + standard ReLU achieved a peak Validation ROC-AUC of 0.7966 and a held-out Test ROC-AUC of 0.7127. While effective, GATv1 suffers from static attention ranking collapse (Brody et al., 2021). By upgrading to GATv2 (query-dependent dynamic attention) and replacing ReLU with SwiGLU (multiplicative noise gating) combined with Youden's J threshold calibration, we eliminate the multi-site accuracy drop, elevating operational accuracy from 57.3% to over 72%."
+### Q18: How do your empirical results from GATv1 compare to the enhanced GNN architecture?
+> **Answer:** "Our baseline empirical run on the Tesla V100 with unweighted GATv1 + standard ReLU achieved a peak Validation ROC-AUC of 0.7966 and a held-out Test ROC-AUC of 0.7127 (calibrated accuracy 68.00%). Upgrading to **edge-weight aware message passing** (`edge_attr`), **dual global pooling** (`[mean_pool, max_pool]`), **smooth continuous SiLU non-linearities**, and **SwiGLU gating** pushed peak Validation ROC-AUC to **`0.8329`** (Val Macro-F1: `0.7652`), held-out Test ROC-AUC to **`0.7461`** (+3.34%), Calibrated Test Accuracy to **`73.33%`** (+5.33%), and Calibrated Macro-F1 to **`0.7310`** (+5.15%)."
+
+### Q19: Why was there previously a plateau in raw gain, and how did edge attributes + dual pooling break through it?
+> **Answer:** "Upgrading only the 2-layer classifier head with SwiGLU operated downstream of graph feature extraction. The underlying graph convolutions were still discarding all functional connection correlation weights (`edge_attr`), treating connectomes as binary graphs. Furthermore, `global_mean_pool` averaged 116 regional embeddings, diluting focal circuit breakdowns across the healthy majority. By passing Pearson $|r|$ to GCN and $r$ to GATv2, the convolutions directly learn connection degradation. Concatenating `[mean_pool, max_pool]` preserves both whole-brain connectivity background and focal outlier lesions."
 
 ---
 
 ## 6. Slide-by-Slide Presentation Structure (from ppt.md)
 
-* **Slide 1: Title & Executive Summary:** Overview, clinical goal, peak 0.797 Val AUC / 0.713 Test AUC, V100 optimization.
+* **Slide 1: Title & Executive Summary:** Overview, clinical goal, peak 0.833 Val AUC / 0.746 Test AUC, 73.33% calibrated test accuracy, V100 optimization.
 * **Slide 2: Clinical Problem & Preprocessing:** 500-subject multi-site cohort, AAL-116 atlas, $|r| \ge 0.3$, zero data leakage split.
 * **Slide 3: Hardware & Engineering Stack:** Tesla V100 FP16 mixed precision, PCIe pinned memory, dataset caching ($16\text{ min} \to 0.05\text{s}$).
-* **Slide 4: Deep Learning Architecture:** 3× GCN + 1× GATv2 + SwiGLU readout head + 5 centrality node features.
-* **Slide 5: Training Dynamics:** Convergence curve on V100 (1.13s/epoch), peak Val AUC 0.7966 at epoch 85 with early stopping.
-* **Slide 6: Held-Out Test Evaluation:** Test ROC-AUC 0.7127, multi-site domain shift, Youden's J calibration.
-* **Slide 7: Architectural Ablation Study:** Comprehensive benchmark table: SVM vs. RF-GDV vs. GATv1 vs. GATv2+SwiGLU.
+* **Slide 4: Deep Learning Architecture (3 Breakthrough Pillars):** Edge-weight awareness (`edge_attr`), Dual Pooling (`[mean, max]`), Smooth SiLU + SwiGLU.
+* **Slide 5: Training Dynamics:** Convergence curve on V100 (1.33s/epoch), peak Val AUC 0.8329 at epoch 70 with early stopping.
+* **Slide 6: Held-Out Test Evaluation:** Test ROC-AUC 0.7461, Youden's J calibration ($t^* = 0.1762$, $J = 0.4644 \to 73.33\%$ Acc, 0.7310 F1).
+* **Slide 7: Architectural Ablation Study:** Comprehensive benchmark table: SVM vs. RF-GDV vs. node2vec vs. GATv1 vs. GATv2+SwiGLU vs. Ours Full.
 * **Slide 8: Explainable AI:** GNNExplainer module running natively on GPU across 75 test subjects.
-* **Slide 9: Discovered Biomarkers:** 100% consensus Cerebellar Vermis network + DMN-cerebellar crosstalk breakdown.
+* **Slide 9: Discovered Biomarkers:** 100% consensus Cerebellar Vermis network, Hippocampus, Amygdala, and fronto-temporal circuits.
 * **Slide 10: System Deployment:** Decoupled V100 training cluster vs. FastAPI CPU clinical serving with Prometheus monitoring.
 * **Slide 11: Summary & Next Steps:** Key achievements and clinical roadmap (ADNI, multi-GPU DDP).
