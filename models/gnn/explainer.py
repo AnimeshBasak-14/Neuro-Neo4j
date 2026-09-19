@@ -188,12 +188,13 @@ class BrainGNNExplainer:
         n_edges = data.edge_index.shape[1]
         n_nodes = data.num_nodes
         n_feats = data.x.shape[1] if data.x is not None else 5
+        device  = data.x.device if data.x is not None else torch.device("cpu")
 
         if self._api_mode == "mock" or self._explainer is None:
             logger.warning("Using dummy explanation masks (explainer unavailable).")
             rng = np.random.default_rng(42)
-            edge_mask     = torch.tensor(rng.random(n_edges), dtype=torch.float32)
-            node_feat_mask= torch.tensor(rng.random((n_nodes, n_feats)), dtype=torch.float32)
+            edge_mask     = torch.tensor(rng.random(n_edges), dtype=torch.float32, device=device)
+            node_feat_mask= torch.tensor(rng.random((n_nodes, n_feats)), dtype=torch.float32, device=device)
             return edge_mask, node_feat_mask
 
         if self._api_mode == "modern":
@@ -201,22 +202,23 @@ class BrainGNNExplainer:
             # so we must NOT use torch.no_grad() here.
             # NOTE: 'target' must NOT be passed for explanation_type='model'
             try:
+                batch = torch.zeros(data.num_nodes, dtype=torch.long, device=device)
                 explanation = self._explainer(
                     x=data.x,
                     edge_index=data.edge_index,
-                    batch=torch.zeros(data.num_nodes, dtype=torch.long),
+                    batch=batch,
                 )
                 edge_mask      = explanation.edge_mask
                 node_feat_mask = (
                     explanation.node_feat_mask
                     if hasattr(explanation, "node_feat_mask") and explanation.node_feat_mask is not None
-                    else torch.zeros((n_nodes, n_feats))
+                    else torch.zeros((n_nodes, n_feats), device=device)
                 )
             except Exception as exc:
                 logger.warning("Modern GNNExplainer failed (%s) — using dummy masks.", exc)
                 rng = np.random.default_rng(42)
-                edge_mask      = torch.tensor(rng.random(n_edges), dtype=torch.float32)
-                node_feat_mask = torch.tensor(rng.random((n_nodes, n_feats)), dtype=torch.float32)
+                edge_mask      = torch.tensor(rng.random(n_edges), dtype=torch.float32, device=device)
+                node_feat_mask = torch.tensor(rng.random((n_nodes, n_feats)), dtype=torch.float32, device=device)
         else:
             # Legacy API — also needs gradients
             try:
@@ -228,8 +230,8 @@ class BrainGNNExplainer:
             except Exception as exc:
                 logger.warning("Legacy GNNExplainer failed (%s) — using dummy masks.", exc)
                 rng = np.random.default_rng(42)
-                edge_mask      = torch.tensor(rng.random(n_edges), dtype=torch.float32)
-                node_feat_mask = torch.tensor(rng.random((n_nodes, n_feats)), dtype=torch.float32)
+                edge_mask      = torch.tensor(rng.random(n_edges), dtype=torch.float32, device=device)
+                node_feat_mask = torch.tensor(rng.random((n_nodes, n_feats)), dtype=torch.float32, device=device)
 
         return edge_mask.detach(), node_feat_mask.detach()
 

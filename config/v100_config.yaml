@@ -32,12 +32,12 @@ atlas:
   n_regions: 116
 
 data:
-  raw_dir: /data/neuro-neo4j/raw
-  processed_dir: /data/neuro-neo4j/processed
-  synthetic_dir: /data/neuro-neo4j/synthetic
-  connectomes_dir: /data/neuro-neo4j/synthetic/connectomes
-  edge_list_file: /data/neuro-neo4j/processed/edge_list.csv
-  subject_metadata_file: /data/neuro-neo4j/processed/subjects.csv
+  raw_dir: data/raw
+  processed_dir: data/processed
+  synthetic_dir: data/synthetic
+  connectomes_dir: data/synthetic/connectomes
+  edge_list_file: data/processed/edge_list.csv
+  subject_metadata_file: data/processed/subjects.csv
   n_synthetic_subjects: 500
 
 neo4j:
@@ -69,9 +69,9 @@ training:
   scheduler: cosine
   warmup_epochs: 5
   early_stopping_patience: 25
-  checkpoint_dir: /data/neuro-neo4j/checkpoints
+  checkpoint_dir: checkpoints
   best_model_filename: best_model_v100.pt
-  log_dir: /data/neuro-neo4j/logs
+  log_dir: logs
 
   # --- V100 precision: FP16 ONLY (Volta has no BF16) ---
   distributed: false               # Set true + torchrun for multi-V100
@@ -110,8 +110,8 @@ explainer:
 monitoring:
   f1_baseline: 0.80
   drift_threshold: 0.05
-  log_file: /data/neuro-neo4j/logs/monitoring.log
-  drift_log_file: /data/neuro-neo4j/logs/drift.json
+  log_file: logs/monitoring.log
+  drift_log_file: logs/drift.json
 
 # ================================================================
 # V100 SERVER SETUP

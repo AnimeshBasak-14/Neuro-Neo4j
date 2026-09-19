@@ -25,6 +25,7 @@ Author: basakanimesh14
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -93,6 +94,16 @@ class BrainConnectomeDataset:
     # ------------------------------------------------------------------
 
     def _load_from_csv(self) -> None:
+        cache_path = Path(self.root) / "cached_dataset.pt" if self.root else None
+        if cache_path and cache_path.exists():
+            try:
+                logger.info("Loading cached PyG dataset from %s", cache_path)
+                self._data_list = torch.load(cache_path, weights_only=False)
+                logger.info("Dataset loaded from cache: %d graphs", len(self._data_list))
+                return
+            except Exception as exc:
+                logger.warning("Failed to load cached dataset (%s) — re-parsing CSVs", exc)
+
         if not Path(self.subjects_csv).exists():
             logger.warning("subjects.csv not found at %s — dataset will be empty.", self.subjects_csv)
             return
@@ -108,24 +119,45 @@ class BrainConnectomeDataset:
             len(subjects_df), len(edge_list_df),
         )
 
-        loaded = 0
+        # Fast O(1) group lookup instead of repeated full-dataframe filtering
+        edge_groups = dict(tuple(edge_list_df.groupby("subject_id")))
+
+        valid_tasks = []
         for _, row in subjects_df.iterrows():
             subject_id = row["PatientID"]
             label      = int(row["Label"])
-            subj_edges = edge_list_df[edge_list_df["subject_id"] == subject_id]
+            subj_edges = edge_groups.get(subject_id)
+            if subj_edges is not None and not subj_edges.empty:
+                valid_tasks.append((subj_edges, label, subject_id))
 
-            if subj_edges.empty:
-                logger.debug("No edges for subject=%s — skipping", subject_id)
-                continue
+        # Parallelize across CPU cores using joblib if available
+        try:
+            from joblib import Parallel, delayed
+            n_jobs = min(16, os.cpu_count() or 4)
+            logger.info("Building %d graphs in parallel across %d CPU workers...", len(valid_tasks), n_jobs)
+            results = Parallel(n_jobs=n_jobs)(
+                delayed(self._build_pyg_data)(edges, label, sid)
+                for edges, label, sid in valid_tasks
+            )
+            self._data_list = [d for d in results if d is not None]
+        except Exception as exc:
+            logger.warning("Parallel build failed (%s) — falling back to serial", exc)
+            self._data_list = []
+            for edges, label, sid in valid_tasks:
+                try:
+                    self._data_list.append(self._build_pyg_data(edges, label, sid))
+                except Exception as e:
+                    logger.error("Failed to build graph for subject=%s: %s", sid, e)
 
-            try:
-                data = self._build_pyg_data(subj_edges, label, subject_id)
-                self._data_list.append(data)
-                loaded += 1
-            except Exception as exc:
-                logger.error("Failed to build graph for subject=%s: %s", subject_id, exc)
-
+        loaded = len(self._data_list)
         logger.info("Dataset loaded: %d graphs", loaded)
+        if cache_path and loaded > 0:
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(self._data_list, cache_path)
+                logger.info("Saved %d graphs to cache: %s", loaded, cache_path)
+            except Exception as exc:
+                logger.warning("Failed to write dataset cache (%s)", exc)
 
     # ------------------------------------------------------------------
     # Graph construction

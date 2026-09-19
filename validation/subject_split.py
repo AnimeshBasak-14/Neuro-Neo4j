@@ -14,44 +14,58 @@ Author: basakanimesh14
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+import torch
 from sklearn.model_selection import train_test_split
 
 logger = logging.getLogger(__name__)
 
 
 def subject_level_split(
-    subjects_df:    pd.DataFrame,
+    subjects_df:    pd.DataFrame | None = None,
     ratios:         tuple[float, float, float] = (0.70, 0.15, 0.15),
     stratify_col:   str = "Diagnosis",
     random_seed:    int = 42,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    dataset:        Any = None,
+    train_ratio:    float | None = None,
+    val_ratio:      float | None = None,
+    seed:           int | None = None,
+) -> tuple[Any, Any, Any]:
     """
     Split subjects into train / validation / test sets at the subject level.
 
     Stratification preserves class distribution (Healthy/Diseased ratio)
     across all three splits.
 
-    Parameters
-    ----------
-    subjects_df  : pd.DataFrame
-        Must contain at least [PatientID, Diagnosis] columns.
-    ratios       : tuple[float, float, float]
-        Proportions for (train, val, test). Must sum to 1.0.
-    stratify_col : str
-        Column to stratify on (default: 'Diagnosis').
-    random_seed  : int
-
-    Returns
-    -------
-    train_df, val_df, test_df : pd.DataFrame  (subject-level)
-
-    Raises
-    ------
-    ValueError  If ratios don't sum to 1.0 or subjects are insufficient.
+    Supports either:
+      1. subjects_df (DataFrame) -> returns (train_df, val_df, test_df)
+      2. dataset (BrainConnectomeDataset) -> returns (train_idx, val_idx, test_idx)
     """
+    if seed is not None:
+        random_seed = seed
+
+    if dataset is not None:
+        if subjects_df is None:
+            if hasattr(dataset, "subjects_csv") and Path(dataset.subjects_csv).exists():
+                subjects_df = pd.read_csv(dataset.subjects_csv)
+            else:
+                # Extract from dataset objects
+                subjects_df = pd.DataFrame([
+                    {"PatientID": getattr(d, "subject_id", f"sub_{i}"),
+                     "Diagnosis": "Diseased" if getattr(d, "y", torch.tensor([0])).item() == 1 else "Healthy"}
+                    for i, d in enumerate(dataset)
+                ])
+        if train_ratio is not None and val_ratio is not None:
+            test_ratio = max(0.0, round(1.0 - train_ratio - val_ratio, 6))
+            ratios = (train_ratio, val_ratio, test_ratio)
+
+    if subjects_df is None:
+        raise ValueError("Either subjects_df or dataset must be provided to subject_level_split.")
+
     assert abs(sum(ratios) - 1.0) < 1e-6, f"Ratios must sum to 1.0, got {sum(ratios):.4f}"
     train_ratio, val_ratio, test_ratio = ratios
 
@@ -87,6 +101,14 @@ def subject_level_split(
             "%-6s split: %3d subjects | %s",
             name, len(df), dist,
         )
+
+    if dataset is not None:
+        subject_to_idx = {getattr(d, "subject_id", f"sub_{i}"): i for i, d in enumerate(dataset)}
+        id_col = "PatientID" if "PatientID" in subjects_df.columns else subjects_df.columns[0]
+        train_idx = [subject_to_idx[sid] for sid in train_df[id_col] if sid in subject_to_idx]
+        val_idx   = [subject_to_idx[sid] for sid in val_df[id_col] if sid in subject_to_idx]
+        test_idx  = [subject_to_idx[sid] for sid in test_df[id_col] if sid in subject_to_idx]
+        return train_idx, val_idx, test_idx
 
     return train_df.reset_index(drop=True), val_df.reset_index(drop=True), test_df.reset_index(drop=True)
 

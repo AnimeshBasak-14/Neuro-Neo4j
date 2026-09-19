@@ -45,7 +45,7 @@ data/processed/
 data/raw/
 *.csv
 !data/synthetic/generate_synthetic.py   # keep the generator script
-!neo4j/etl/load_csv.cypher             # keep the cypher loader
+!neo4j_layer/etl/load_csv.cypher       # keep the cypher loader
 
 # ── Model checkpoints (large binaries) ────────────────────────────────────────
 checkpoints/

@@ -31,7 +31,7 @@ services:
       - neo4j_logs:/logs
       - neo4j_import:/var/lib/neo4j/import
       - ./data/processed:/var/lib/neo4j/import/data
-      - ./neo4j/schema:/var/lib/neo4j/import/schema
+      - ./neo4j_layer/schema:/var/lib/neo4j/import/schema
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p neuro_password 'RETURN 1' || exit 1"]
       interval: 30s

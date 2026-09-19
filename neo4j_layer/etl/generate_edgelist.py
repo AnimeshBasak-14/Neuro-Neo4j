@@ -26,7 +26,7 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from neo4j.etl.transform import ConnectomeTransformer
+from neo4j_layer.etl.transform import ConnectomeTransformer
 from data.synthetic.generate_synthetic import AAL116_REGIONS
 
 logging.basicConfig(
