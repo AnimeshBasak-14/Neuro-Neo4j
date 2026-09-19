@@ -273,6 +273,8 @@ def step_train_evaluate(cfg: dict, train_loader, val_loader, test_loader, device
         dropout=mc["dropout"],
         num_gcn_layers=mc["num_gcn_layers"],
         num_gat_layers=mc["num_gat_layers"],
+        use_swiglu=mc.get("use_swiglu", True),
+        use_gatv2=mc.get("use_gatv2", True),
     ).to(device)
 
     tc        = cfg["training"]
