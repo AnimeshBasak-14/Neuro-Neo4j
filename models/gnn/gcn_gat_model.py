@@ -31,7 +31,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch_geometric.data import Data
-from torch_geometric.nn import GATConv, GATv2Conv, GCNConv, global_mean_pool
+from torch_geometric.nn import GATConv, GATv2Conv, GCNConv, global_mean_pool, global_max_pool
 
 logger = logging.getLogger(__name__)
 
@@ -97,27 +97,31 @@ class BrainGNNModel(nn.Module):
 
     def __init__(
         self,
-        in_channels:     int = 5,
-        hidden_channels: int = 64,
-        num_classes:     int = 2,
-        num_heads:       int = 4,
-        dropout:         float = 0.3,
-        num_gcn_layers:  int = 2,
-        num_gat_layers:  int = 1,
-        use_swiglu:      bool = True,
-        use_gatv2:       bool = True,
+        in_channels:      int = 5,
+        hidden_channels:  int = 64,
+        num_classes:      int = 2,
+        num_heads:        int = 4,
+        dropout:          float = 0.3,
+        num_gcn_layers:   int = 2,
+        num_gat_layers:   int = 1,
+        use_swiglu:       bool = True,
+        use_gatv2:        bool = True,
+        use_edge_attr:    bool = True,
+        use_dual_pooling: bool = True,
     ) -> None:
         super().__init__()
 
-        self.in_channels     = in_channels
-        self.hidden_channels = hidden_channels
-        self.num_classes     = num_classes
-        self.num_heads       = num_heads
-        self.dropout         = dropout
-        self.num_gcn_layers  = num_gcn_layers
-        self.num_gat_layers  = num_gat_layers
-        self.use_swiglu      = use_swiglu
-        self.use_gatv2       = use_gatv2
+        self.in_channels      = in_channels
+        self.hidden_channels  = hidden_channels
+        self.num_classes      = num_classes
+        self.num_heads        = num_heads
+        self.dropout          = dropout
+        self.num_gcn_layers   = num_gcn_layers
+        self.num_gat_layers   = num_gat_layers
+        self.use_swiglu       = use_swiglu
+        self.use_gatv2        = use_gatv2
+        self.use_edge_attr    = use_edge_attr
+        self.use_dual_pooling = use_dual_pooling
 
         # ----------------------------------------------------------
         # Input projection (maps raw features → hidden space)
@@ -150,6 +154,7 @@ class BrainGNNModel(nn.Module):
                     heads=num_heads,
                     dropout=dropout,
                     concat=True,
+                    edge_dim=1 if (use_gatv2 and use_edge_attr) else None,
                 )
             )
             # After concat: num_heads * (hidden // num_heads) = hidden_channels
@@ -159,11 +164,12 @@ class BrainGNNModel(nn.Module):
         # ----------------------------------------------------------
         # Classifier Head (SwiGLU SOTA Gated Unit or Standard MLP)
         # ----------------------------------------------------------
+        classifier_in = hidden_channels * 2 if use_dual_pooling else hidden_channels
         if use_swiglu:
             self.classifier = nn.Sequential(
                 SwiGLU(
-                    in_features=hidden_channels,
-                    hidden_features=hidden_channels,
+                    in_features=classifier_in,
+                    hidden_features=classifier_in,
                     out_features=hidden_channels // 2,
                     bias=True,
                 ),
@@ -172,18 +178,20 @@ class BrainGNNModel(nn.Module):
             )
         else:
             self.classifier = nn.Sequential(
-                nn.Linear(hidden_channels, hidden_channels // 2),
-                nn.ReLU(),
+                nn.Linear(classifier_in, hidden_channels // 2),
+                nn.SiLU(),
                 nn.Dropout(dropout),
                 nn.Linear(hidden_channels // 2, num_classes),
             )
 
         self._init_weights()
         logger.info(
-            "BrainGNNModel initialised | params=%d | SwiGLU=%s | GATv2=%s",
+            "BrainGNNModel initialised | params=%d | SwiGLU=%s | GATv2=%s | EdgeAttr=%s | DualPool=%s",
             self.count_parameters(),
             use_swiglu,
             use_gatv2,
+            use_edge_attr,
+            use_dual_pooling,
         )
 
     def _init_weights(self) -> None:
@@ -220,29 +228,49 @@ class BrainGNNModel(nn.Module):
         Tensor  (B, num_classes)  Unnormalised logits per graph
         """
         # Input projection
-        h = F.relu(self.input_proj(x))
+        h = F.silu(self.input_proj(x))
         h = F.dropout(h, p=self.dropout, training=self.training)
+
+        # Prepare edge weights / attributes if available
+        edge_weight: Optional[Tensor] = None
+        gat_edge_attr: Optional[Tensor] = None
+        if self.use_edge_attr and edge_attr is not None:
+            if edge_attr.dim() == 1:
+                edge_weight = torch.abs(edge_attr)
+                gat_edge_attr = edge_attr.unsqueeze(-1)
+            elif edge_attr.dim() == 2:
+                edge_weight = torch.abs(edge_attr.squeeze(-1))
+                gat_edge_attr = edge_attr
 
         # GCN layers with residual connection
         for conv, bn in zip(self.gcn_convs, self.gcn_bns):
-            h_new = conv(h, edge_index)
+            h_new = conv(h, edge_index, edge_weight=edge_weight)
             h_new = bn(h_new)
-            h_new = F.relu(h_new)
+            h_new = F.silu(h_new)
             h_new = F.dropout(h_new, p=self.dropout, training=self.training)
             h = h + h_new  # residual (same dim)
 
         # GATv2 / GAT layers with residual connection
         for conv, bn, proj in zip(self.gat_convs, self.gat_bns, self.gat_projs):
-            h_new = conv(h, edge_index)   # concat heads → hidden_channels
+            if self.use_gatv2 and self.use_edge_attr and gat_edge_attr is not None:
+                h_new = conv(h, edge_index, edge_attr=gat_edge_attr)
+            else:
+                h_new = conv(h, edge_index)   # concat heads → hidden_channels
             h_new = bn(h_new)
-            h_new = F.elu(h_new)
+            h_new = F.silu(h_new)
             h_new = F.dropout(h_new, p=self.dropout, training=self.training)
             h = h + h_new  # residual
 
-        # Global mean pooling → graph-level representation
+        # Global pooling → graph-level representation (Dual: mean + max)
         if batch is None:
             batch = torch.zeros(h.size(0), dtype=torch.long, device=h.device)
-        graph_repr = global_mean_pool(h, batch)   # (B, hidden_channels)
+
+        if self.use_dual_pooling:
+            mean_pool = global_mean_pool(h, batch)
+            max_pool  = global_max_pool(h, batch)
+            graph_repr = torch.cat([mean_pool, max_pool], dim=-1)   # (B, hidden_channels * 2)
+        else:
+            graph_repr = global_mean_pool(h, batch)                 # (B, hidden_channels)
 
         # Classifier head (SwiGLU)
         logits = self.classifier(graph_repr)       # (B, num_classes)
@@ -256,6 +284,7 @@ class BrainGNNModel(nn.Module):
         self,
         x:          Tensor,
         edge_index: Tensor,
+        edge_attr:  Optional[Tensor] = None,
     ) -> list[Tensor]:
         """
         Extract attention coefficients α_ij for all GAT/GATv2 layers.
@@ -264,22 +293,36 @@ class BrainGNNModel(nn.Module):
         ----------
         x          : Tensor  (N, in_channels)
         edge_index : Tensor  (2, E)
+        edge_attr  : Tensor  (E, 1) optional edge features
 
         Returns
         -------
         list of Tensor  One (E, num_heads) attention tensor per GAT layer
         """
-        h = F.relu(self.input_proj(x))
+        h = F.silu(self.input_proj(x))
+
+        edge_weight: Optional[Tensor] = None
+        gat_edge_attr: Optional[Tensor] = None
+        if self.use_edge_attr and edge_attr is not None:
+            if edge_attr.dim() == 1:
+                edge_weight = torch.abs(edge_attr)
+                gat_edge_attr = edge_attr.unsqueeze(-1)
+            elif edge_attr.dim() == 2:
+                edge_weight = torch.abs(edge_attr.squeeze(-1))
+                gat_edge_attr = edge_attr
 
         for conv, bn in zip(self.gcn_convs, self.gcn_bns):
-            h_new = F.relu(bn(conv(h, edge_index)))
+            h_new = F.silu(bn(conv(h, edge_index, edge_weight=edge_weight)))
             h = h + h_new
 
         attention_weights: list[Tensor] = []
         for conv, bn in zip(self.gat_convs, self.gat_bns):
-            h_new, (_, alpha) = conv(h, edge_index, return_attention_weights=True)
+            if self.use_gatv2 and self.use_edge_attr and gat_edge_attr is not None:
+                h_new, (_, alpha) = conv(h, edge_index, edge_attr=gat_edge_attr, return_attention_weights=True)
+            else:
+                h_new, (_, alpha) = conv(h, edge_index, return_attention_weights=True)
             attention_weights.append(alpha)
-            h_new = F.elu(bn(h_new))
+            h_new = F.silu(bn(h_new))
             h = h + h_new
 
         return attention_weights

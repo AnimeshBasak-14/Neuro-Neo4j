@@ -275,6 +275,8 @@ def step_train_evaluate(cfg: dict, train_loader, val_loader, test_loader, device
         num_gat_layers=mc["num_gat_layers"],
         use_swiglu=mc.get("use_swiglu", True),
         use_gatv2=mc.get("use_gatv2", True),
+        use_edge_attr=mc.get("use_edge_attr", True),
+        use_dual_pooling=mc.get("use_dual_pooling", True),
     ).to(device)
 
     tc        = cfg["training"]

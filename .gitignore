@@ -55,7 +55,9 @@ checkpoints/
 *.safetensors
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
-logs/
+logs/*
+!logs/plots/
+!logs/plots/*.png
 *.log
 *.json
 !pyproject.toml                         # not a log, keep it

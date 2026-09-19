@@ -60,6 +60,10 @@ model:
   use_batch_norm: true
   use_residual: true
   mlp_hidden: 96
+  use_swiglu: true
+  use_gatv2: true
+  use_edge_attr: true
+  use_dual_pooling: true
 
 training:
   epochs: 200
