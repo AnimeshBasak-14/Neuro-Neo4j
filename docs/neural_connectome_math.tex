@@ -1,0 +1,122 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts,amsthm}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+
+\title{\textbf{Mathematical Foundations of Explainable Graph Neural Networks and Multi-Modal Connectome Modeling (Neuro-Neo4j)}}
+\author{\textbf{Animesh Basak} \\ Department of Computer Science \& Engineering \\ Indian Institute of Technology Roorkee (IIT Roorkee)}
+\date{September 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document provides the formal mathematical treatise for PhD research on Explainable Graph Neural Networks for neurological biomarker discovery from functional and structural neuroimaging connectomes. We systematically formalize the nine core mathematical operators governing connectome sparsification, non-Euclidean graph-level classification, dynamic edge-weighted message passing, gated non-linear classification heads, statistical threshold calibration, information-theoretic explainability, and multi-modal graph fusion.
+\end{abstract}
+
+\section{Graph Representation of Functional Brain Connectomes}
+
+Let an anatomical brain parcellation (e.g., Automated Anatomical Labeling, AAL-116) divide the human brain volume into $N = |V| = 116$ regions of interest (ROIs). For a clinical subject $k$, let $\bm{x}_i(t) \in \mathbb{R}^T$ denote the resting-state blood-oxygen-level-dependent (BOLD) functional magnetic resonance imaging (fMRI) time series extracted from region $i \in V$ over $T$ acquisition frames.
+
+\subsection{Formulation 1: Pairwise Pearson Correlation Operator}
+Functional connectivity between anatomical regions $i$ and $j$ is quantified by the bivariate Pearson product-moment correlation coefficient $r_{ij} \in [-1, 1]$:
+\begin{equation}
+r_{ij} = \frac{\sum_{t=1}^T \big(x_i(t) - \bar{x}_i\big)\big(x_j(t) - \bar{x}_j\big)}{\sqrt{\sum_{t=1}^T \big(x_i(t) - \bar{x}_i\big)^2} \sqrt{\sum_{t=1}^T \big(x_j(t) - \bar{x}_j\big)^2}}
+\end{equation}
+where $\bar{x}_i = \frac{1}{T}\sum_{t=1}^T x_i(t)$. To eliminate spurious acquisition fluctuations and non-neural physiological artifacts, we apply a sparsification operator with threshold $\tau = 0.3$:
+\begin{equation}
+A_{ij} = \begin{cases} 
+|r_{ij}|, & \text{if } |r_{ij}| \ge \tau \text{ and } i \ne j \\ 
+0, & \text{otherwise} 
+\end{cases}
+\end{equation}
+yielding a sparse undirected brain graph $G_k = (V, E_k, X_k)$, where $E_k = \{(i, j) \mid A_{ij} > 0\}$, continuous edge attributes $e_{ij} = r_{ij}$, and node feature matrix $X_k \in \mathbb{R}^{|V| \times F}$ with $F=5$ graph-theoretic centralities (Degree, PageRank, Clustering Coefficient, Betweenness, and Eigenvector centrality).
+
+\subsection{Formulation 2: Graph-Level Binary Diagnostic Objective}
+Given a cohort of subjects $\{G_k, y_k\}_{k=1}^K$, where $y_k \in \{0 \text{ (Healthy Control)}, 1 \text{ (Neurodegenerative)}\}$, the graph-level classification problem seeks a parameterized mapping $f_{\bm{\theta}}$ satisfying:
+\begin{equation}
+P(y_k = 1 \mid G_k) = \sigma\big( f_{\bm{\theta}}(A_k, X_k, E_k) \big) = \frac{1}{1 + \exp\big(-f_{\bm{\theta}}(A_k, X_k, E_k)\big)}
+\end{equation}
+subject to strict subject-level stratification $S_{\text{train}} \cap S_{\text{test}} = \emptyset$ ensuring zero patient identity leakage.
+
+\section{Neural Message Passing on Non-Euclidean Connectomes}
+
+\subsection{Formulation 3: Edge-Weight Aware Graph Convolution (Neighborhood Aggregation)}
+Standard graph convolutions treat connected neighbors uniformly. We incorporate continuous functional coupling weights $e_{ij} = |r_{ij}|$ into the normalized Laplacian propagation:
+\begin{equation}
+h_i^{(l+1)} = \text{SiLU}\left( \bm{W}_{\text{GCN}}^{(l)} \sum_{j \in \mathcal{N}_i \cup \{i\}} \frac{e_{ij}}{\sqrt{\tilde{d}_i \tilde{d}_j}} \, h_j^{(l)} \right) + h_i^{(l)}
+\end{equation}
+where $\tilde{d}_i = 1 + \sum_{j \in \mathcal{N}_i} e_{ij}$ denotes the weighted node degree, and $+ h_i^{(l)}$ provides residual identity skip connections preserving multi-scale feature representations.
+
+\subsection{Formulation 4: Standard Graph Attention (GATv1) and Static Rank Collapse}
+In standard GATv1, self-attention coefficients are computed as:
+\begin{equation}
+\alpha_{ij}^{\text{GATv1}} = \frac{\exp\left( \text{LeakyReLU}\big( \bm{a}^T [\bm{W} h_i \,\|\, \bm{W} h_j] \big) \right)}{\sum_{k \in \mathcal{N}_i} \exp\left( \text{LeakyReLU}\big( \bm{a}^T [\bm{W} h_i \,\|\, \bm{W} h_k] \big) \right)}
+\end{equation}
+\textbf{The Brody et al. (2021) Limitation:} Because the projection $\bm{W}$ and scoring vector $\bm{a} = [\bm{a}_l \,\|\, \bm{a}_r]$ are linearly combined prior to non-linear activation:
+\begin{equation}
+\bm{a}^T [\bm{W} h_i \,\|\, \bm{W} h_j] = \bm{a}_l^T \bm{W} h_i + \bm{a}_r^T \bm{W} h_j
+\end{equation}
+the relative ranking of attention weights for any neighbor $j$ is strictly monotonic with respect to $\bm{a}_r^T \bm{W} h_j$ across all query nodes $i$, causing \emph{static attention rank collapse}.
+
+\subsection{Formulation 5: GATv2 Dynamic Attention with Continuous Edge Attributes}
+To enable strictly dynamic, query-dependent attention that accounts for continuous functional coupling strength $e_{ij}$, we apply non-linear projection \emph{before} inner product computation:
+\begin{equation}
+\alpha_{ij} = \frac{\exp\left( \bm{a}^T \text{LeakyReLU}\big( \bm{W}_l h_i + \bm{W}_r h_j + \bm{W}_e e_{ij} \big) \right)}{\sum_{k \in \mathcal{N}_i} \exp\left( \bm{a}^T \text{LeakyReLU}\big( \bm{W}_l h_i + \bm{W}_r h_k + \bm{W}_e e_{ik} \big) \right)}
+\end{equation}
+With multi-head attention ($H$ heads), node features are updated via:
+\begin{equation}
+h_i^{(l+1)} = \text{SiLU}\left( \Vert_{k=1}^H \sum_{j \in \mathcal{N}_i} \alpha_{ij}^k \bm{W}_v^k h_j^{(l)} \right) + h_i^{(l)}
+\end{equation}
+
+\section{Graph Readout, Noise Gating, and Calibration}
+
+\subsection{Formulation 6: Dual Global Readout Pooling}
+To simultaneously capture whole-brain background connectivity and focal localized lesion hubs, we concatenate permutation-invariant global mean and global maximum pooling:
+\begin{equation}
+h_G = \left[ h_{\text{mean}} \,\|\, h_{\text{max}} \right] = \left[ \frac{1}{|V|} \sum_{v \in V} h_v \, \Bigg\|\, \max_{v \in V}(h_v) \right] \in \mathbb{R}^{2d}
+\end{equation}
+
+\subsection{Formulation 7: SwiGLU Gated Feed-Forward Readout Head}
+To dynamically suppress scanner site signal-to-noise ratio (SNR) fluctuations across clinical hospital centers, we employ a Swish Gated Linear Unit (Shazeer, 2020):
+\begin{equation}
+\text{SwiGLU}(h_G) = \Big( \text{Swish}(h_G \bm{W}_{\text{gate}} + \bm{b}_{\text{gate}}) \odot (h_G \bm{W}_{\text{up}} + \bm{b}_{\text{up}}) \Big) \bm{W}_{\text{down}} + \bm{b}_{\text{down}}
+\end{equation}
+where $\text{Swish}(z) = z \cdot \sigma(\beta z) = \frac{z}{1 + e^{-\beta z}}$. The gating branch performs multiplicative noise filtering prior to linear classification.
+
+\subsection{Formulation 8: Decision Threshold Optimization via Youden's J-Statistic}
+Under multi-scanner domain shifts, the standard $p = 0.5$ decision threshold produces sub-optimal clinical sensitivity. We optimize the operating boundary $t^*$ on the validation ROC manifold:
+\begin{equation}
+J(t) = \text{Sensitivity}(t) + \text{Specificity}(t) - 1 = \text{TPR}(t) - \text{FPR}(t)
+\end{equation}
+\begin{equation}
+t^* = \arg\max_{t \in [0, 1]} J(t), \qquad \hat{y} = \mathbb{I}\Big( P(y = 1 \mid G) \ge t^* \Big)
+\end{equation}
+
+\section{Formulation 9: Information-Theoretic Biomarker Extraction}
+To extract the minimal explanatory functional subnetwork $G_s = (V_s, E_s)$ driving prediction $\hat{y}$, we maximize the mutual information objective:
+\begin{equation}
+\max_{G_s} \text{MI}(Y, G_s) = H(Y) - H(Y \mid G = G_s)
+\end{equation}
+Under continuous edge mask $\bm{M} \in \mathbb{R}^{|E|}$ and node feature mask $\bm{F} \in \mathbb{R}^{|V| \times F}$, we freeze model weights $\bm{\theta}$ and minimize:
+\begin{equation}
+\min_{\bm{M}, \bm{F}} \mathcal{L}_{\text{CE}}\Big( \hat{y}, f_{\bm{\theta}}\big( A \odot \sigma(\bm{M}), X \odot \sigma(\bm{F}) \big) \Big) + \lambda_1 \|\sigma(\bm{M})\|_1 + \lambda_2 \text{Ent}(\bm{M})
+\end{equation}
+where $\text{Ent}(\bm{M}) = -\sum_{e} \big[ \sigma(M_e) \log \sigma(M_e) + (1 - \sigma(M_e)) \log (1 - \sigma(M_e)) \big]$ regularizes masks towards discrete, interpretable subgraphs.
+
+\section{Extension: Multi-Modal Attentive Fusion Operator (fMRI + DTI)}
+Functional connectivity ($A_{\text{func}}$) is physically grounded in white-matter axonal tractography ($A_{\text{struct}}$). For dual connectomes $G = (V, E_{\text{func}}, E_{\text{struct}}, X)$, we formulate an adaptive cross-modal attentional gate:
+\begin{equation}
+h_i^{\text{fused}} = \gamma_i \cdot h_i^{\text{func}} + (1 - \gamma_i) \cdot h_i^{\text{struct}}
+\end{equation}
+\begin{equation}
+\gamma_i = \sigma\Big( \bm{W}_\gamma \big[ h_i^{\text{func}} \,\|\, h_i^{\text{struct}} \big] + b_\gamma \Big) \in (0, 1)
+\end{equation}
+where $h_i^{\text{func}}$ and $h_i^{\text{struct}}$ denote regional representations encoded via edge-attributed GATv2 layers on functional and structural graphs, respectively.
+
+\end{document}
