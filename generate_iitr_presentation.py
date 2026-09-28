@@ -6,9 +6,9 @@ Generates the official IIT Roorkee presentation adhering strictly to:
    - Part 1: Problem Statement
    - Part 2: Baselines (3-4 papers)
    - Part 3: What you are going to do (Proposed Research & Methodology)
-   - Presentation framed prospectively as the PhD research plan ("What we will do / proposed framework")
+   - Prospective PhD research plan ("What we will do / proposed framework")
    - Time limit: 10 minutes (8 min presentation + 2 min Q&A)
-   - Rigorous mathematical formulations on every slide (equations 1-9)
+   - Rigorous mathematical formulations rendered directly as authentic LaTeX equations (assets/math/*.png)
    - Prepares multi-modal extension (fMRI functional + DTI structural tractography)
 2. Official IIT Roorkee Template:
    - IITR_template.pptx (Layouts: Title, Content, Comparison, Last Slide)
@@ -53,7 +53,7 @@ def build_iitr_deck():
     layout_last = prs.slide_layouts[4]
 
     # Helper function for adding structured content cards
-    def create_card(slide, left, top, width, height, title, items, border_color=COLOR_BORDER, title_color=COLOR_NAVY):
+    def create_card(slide, left, top, width, height, title, items, border_color=COLOR_BORDER, title_color=COLOR_NAVY, title_size=11.5, item_size=9.2):
         card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height)
         card.fill.solid()
         card.fill.fore_color.rgb = COLOR_CARD_BG
@@ -64,22 +64,33 @@ def build_iitr_deck():
         ctf.word_wrap = True
         ctf.margin_left = Inches(0.18)
         ctf.margin_right = Inches(0.18)
-        ctf.margin_top = Inches(0.14)
-        ctf.margin_bottom = Inches(0.14)
+        ctf.margin_top = Inches(0.12)
+        ctf.margin_bottom = Inches(0.12)
 
         tp = ctf.paragraphs[0]
         tp.text = title
-        tp.font.size = Pt(11.5)
+        tp.font.size = Pt(title_size)
         tp.font.bold = True
         tp.font.color.rgb = title_color
 
         for it in items:
             p = ctf.add_paragraph()
             p.text = it
-            p.font.size = Pt(9.5)
+            p.font.size = Pt(item_size)
             p.font.color.rgb = COLOR_DARK
-            p.space_before = Pt(2.5)
+            p.space_before = Pt(2.0)
         return card
+
+    # Helper function to add a LaTeX equation image with an optional caption
+    def add_math_image(slide, img_path, left, top, width, height=None):
+        if not os.path.exists(img_path):
+            print(f"[WARN] Equation image not found: {img_path}")
+            return None
+        if height is not None:
+            pic = slide.shapes.add_picture(img_path, left, top, width=width, height=height)
+        else:
+            pic = slide.shapes.add_picture(img_path, left, top, width=width)
+        return pic
 
     # =========================================================================
     # SLIDE 1: Title Slide (Official IITR Format)
@@ -157,24 +168,21 @@ def build_iitr_deck():
     c1_items = [
         "• Anatomical Parcellation: Automated Anatomical Labeling (AAL-116) partitions brain into |V| = 116 anatomical ROIs.",
         "• BOLD Time Series: For region i in V, let x_i(t) in R^T represent blood-oxygen-level-dependent signal over T timepoints.",
-        "• Mathematical Formulation 1 — Pearson Correlation Coefficient (Functional Edge Weights):",
-        "     r_{ij} = ( sum_{t=1}^T (x_i(t) - mu_i)(x_j(t) - mu_j) ) / ( sqrt{sum_{t=1}^T (x_i(t)-mu_i)^2} * sqrt{sum_{t=1}^T (x_j(t)-mu_j)^2} ) in [-1, 1]",
-        "• Sparsified Adjacency Matrix: To filter acquisition noise and physiological artifacts:",
-        "     A_{ij} = |r_{ij}|  if |r_{ij}| >= tau (threshold tau = 0.3); else 0, with A_{ii} = 0",
-        "• Node Feature Matrix: X in R^{|V| x F} with F=5 graph-theoretic topological descriptors (Degree, PageRank, Clustering, Betweenness, Eigenvector)."
+        "• Node Feature Matrix: X in R^{|V| x 5} with graph-theoretic descriptors (Degree, PageRank, Clustering, Betweenness, Eigenvector)."
     ]
-    create_card(s3, Inches(0.6), Inches(1.1), Inches(8.8), Inches(3.0), "A. Mathematical Formulation of Brain Connectome G = (V, E, X)", c1_items)
+    create_card(s3, Inches(0.6), Inches(1.05), Inches(8.8), Inches(2.85), "A. Mathematical Formulation 1: Brain Connectome Graph G = (V, E, X)", c1_items)
+    add_math_image(s3, "assets/math/eq1_pearson.png", Inches(1.0), Inches(2.1), Inches(4.5))
+    add_math_image(s3, "assets/math/eq1_sparsification.png", Inches(1.0), Inches(2.9), Inches(5.2))
 
     c2_items = [
-        "• Mathematical Formulation 2 — Graph-Level Binary Classification Objective:",
-        "     P(y_k = 1 | G_k) = sigma( f_theta(A_k, X_k) ),  where y_k in {0 (Healthy Control), 1 (Neurodegenerative)}",
-        "     Objective: Classify the global network state of the whole brain graph rather than isolated individual voxels.",
-        "• Mathematical Formulation 9 — Subgraph Explanation Objective:",
-        "     Find compact explanatory subgraph M_k subseteq G_k that maximizes Mutual Information:",
+        "• Graph-Level Binary Classification Objective: Classify the whole-brain network state rather than isolated voxels:",
+        "",
+        "• Subgraph Explanation Objective: Find explanatory subgraph M_k subseteq G_k maximizing Mutual Information:",
         "     max_{M_k}  MI( y_k, G_k * M_k ) = H(y_k) - H(y_k | G_k * M_k)",
-        "• Rigorous Constraint: Subject-level data partitioning (S_train intersect S_test = emptyset) to guarantee zero identity leakage."
+        "• Patient-Stratified Cross-Validation: S_train intersect S_test = emptyset (guarantees zero subject identity leakage)."
     ]
-    create_card(s3, Inches(0.6), Inches(4.2), Inches(8.8), Inches(2.7), "B. Graph-Level Classification & Explanation Objectives", c2_items)
+    create_card(s3, Inches(0.6), Inches(4.05), Inches(8.8), Inches(2.8), "B. Mathematical Formulation 2: Graph Classification & Explanation Objectives", c2_items)
+    add_math_image(s3, "assets/math/eq2_classification.png", Inches(1.0), Inches(4.7), Inches(4.6))
 
     # =========================================================================
     # SLIDE 4: Baselines Paper 1 & 2 — Shallow & Network Motif Models
@@ -184,25 +192,21 @@ def build_iitr_deck():
 
     p1_items = [
         "• Reference: Abraham et al. (NeuroImage 2017) / Cuingnet et al. (NeuroImage 2011)",
-        "• Methodology: Vectorizes upper triangle of functional connectivity matrix into a flat 1D vector v in R^{6670}.",
-        "• Mathematical Formulation (Dual Soft-Margin SVM with RBF Kernel):",
-        "     max_{alpha} sum_{k=1}^N alpha_k - 0.5 * sum_{k,l} alpha_k alpha_l y_k y_l K(v_k, v_l)",
-        "     subject to:  0 <= alpha_k <= C,   sum_{k=1}^N alpha_k y_k = 0",
-        "     where K(v_k, v_l) = exp( - gamma * ||v_k - v_l||_2^2 )",
+        "• Vectorizes upper triangle of functional connectivity matrix into a flat 1D vector v in R^{6670}:",
+        "",
         "• Critical Limitation: Treats all 6,670 pairwise edges as independent Euclidean dimensions. Completely loses network topology, clique hierarchy, and hub clustering."
     ]
-    create_card(s4, Inches(0.6), Inches(1.1), Inches(8.8), Inches(2.75), "Paper 1: Kernel Support Vector Machines on Vectorized Connectomes", p1_items)
+    create_card(s4, Inches(0.6), Inches(1.05), Inches(8.8), Inches(2.85), "Paper 1: Kernel Support Vector Machines on Vectorized Connectomes", p1_items)
+    add_math_image(s4, "assets/math/base_svm.png", Inches(0.9), Inches(1.95), Inches(6.0))
 
     p2_items = [
         "• Reference: Pržulj et al. (Bioinformatics 2007) / Yaveroğlu et al. (Nature Scientific Reports 2014)",
-        "• Methodology: Counts non-isomorphic small induced subgraphs (graphlets on 2-5 nodes, orbits 0-72).",
-        "• Mathematical Formulation:",
-        "     For node u in V, Graphlet Degree Vector: GDV(u) = [ u_0, u_1, ..., u_d ]^T,  u_j = count of orbit j instances.",
-        "     Graph-level summary features: Phi(G) = [ mean(GDV), std(GDV), max(GDV) ] in R^{15}.",
-        "     Random Forest Ensemble: f_RF(Phi) = (1/B) sum_{b=1}^B T_b(Phi).",
+        "• Counts non-isomorphic small induced subgraphs (graphlets on 2-5 nodes, orbits 0-72):",
+        "",
         "• Critical Limitation: Relies entirely on static, handcrafted graph topological counts. Lacks end-to-end gradient backpropagation and cannot learn dynamic edge importance."
     ]
-    create_card(s4, Inches(0.6), Inches(3.95), Inches(8.8), Inches(2.9), "Paper 2: Random Forest with Graphlet Degree Vectors (RF-GDV)", p2_items)
+    create_card(s4, Inches(0.6), Inches(4.05), Inches(8.8), Inches(2.85), "Paper 2: Random Forest with Graphlet Degree Vectors (RF-GDV)", p2_items)
+    add_math_image(s4, "assets/math/base_rf_gdv.png", Inches(0.9), Inches(4.95), Inches(6.0))
 
     # =========================================================================
     # SLIDE 5: Baselines Paper 3 & 4 — Random Walks & Standard GAT
@@ -212,25 +216,24 @@ def build_iitr_deck():
 
     p3_items = [
         "• Reference: Grover & Leskovec (KDD 2016) / Connectome Applications (Mahmood et al., 2021)",
-        "• Methodology: Learns continuous node embeddings via 2nd-order biased random walks.",
-        "• Mathematical Formulation (Transition Probability):",
-        "     P(c_i = x | c_{i-1} = v) = ( pi_{vx} ) / Z,   where  pi_{vx} = alpha_{pq}(t, x) * w_{vx}",
-        "     Bias factor: alpha_{pq}(t, x) = 1/p if d_{tx}=0;  1 if d_{tx}=1;  1/q if d_{tx}=2",
-        "     Objective: max_f sum_{u in V} log P( N_S(u) | f(u) ) using Skip-Gram with Negative Sampling.",
+        "• Learns continuous node embeddings via 2nd-order biased random walks:",
+        "",
         "• Critical Limitation: Transductive random walk embeddings are trained unsupervised without disease label guidance; subsequent mean-pooling loses graph structural discriminability."
     ]
-    create_card(s5, Inches(0.6), Inches(1.1), Inches(8.8), Inches(2.75), "Paper 3: node2vec Biased Random Walk Connectome Embeddings", p3_items)
+    create_card(s5, Inches(0.6), Inches(1.05), Inches(8.8), Inches(2.85), "Paper 3: node2vec Biased Random Walk Connectome Embeddings", p3_items)
+    add_math_image(s5, "assets/math/base_node2vec.png", Inches(0.9), Inches(1.95), Inches(5.8))
 
     p4_items = [
         "• Reference: Veličković et al. (ICLR 2018) / BrainGNN (Li et al., Medical Image Analysis 2021)",
-        "• Methodology: Self-attention over graph neighbors to weight regional communicative connections.",
-        "• Mathematical Formulation 4 — Standard GATv1 Attention:",
-        "     alpha_{ij} = ( exp( LeakyReLU( a^T [ W h_i || W h_j ] ) ) ) / ( sum_{k in N_i} exp( LeakyReLU( a^T [ W h_i || W h_k ] ) ) )",
+        "• Self-attention over graph neighbors to weight regional communicative connections:",
+        "",
         "• Fatal Mathematical Flaw (Static Attention / Rank Collapse, Brody et al. 2021):",
-        "     Since a^T [W h_i || W h_j] = a_l^T W h_i + a_r^T W h_j, the relative score for neighbor j is strictly monotonic in a_r^T W h_j.",
-        "     Thus, the ranking of neighbors is global and identical for all query nodes i, preventing patient-specific adaptive attention."
+        "",
+        "• Consequence: The neighbor ranking is global and identical for all query nodes i, preventing patient-specific adaptive attention."
     ]
-    create_card(s5, Inches(0.6), Inches(3.95), Inches(8.8), Inches(2.9), "Paper 4: Standard Graph Attention Networks (GATv1)", p4_items, border_color=COLOR_RED, title_color=COLOR_RED)
+    create_card(s5, Inches(0.6), Inches(4.05), Inches(8.8), Inches(2.85), "Paper 4: Standard Graph Attention Networks (GATv1)", p4_items, border_color=COLOR_RED, title_color=COLOR_RED)
+    add_math_image(s5, "assets/math/eq4_gatv1.png", Inches(0.9), Inches(4.7), Inches(5.0))
+    add_math_image(s5, "assets/math/base_gatv1_defect.png", Inches(0.9), Inches(5.6), Inches(5.8))
 
     # =========================================================================
     # SLIDE 6: Comparative Analysis of Baseline Limitations
@@ -290,28 +293,30 @@ def build_iitr_deck():
 
     gcn_items = [
         "• Mathematical Formulation 3 — Edge-Weight Aware Graph Convolution (Neighborhood Aggregation):",
-        "     h_i^{(l+1)} = SiLU ( W_GCN^{(l)} * sum_{j in N_i cup {i}} ( e_{ij} / sqrt{d_i * d_j} ) * h_j^{(l)} ) + h_i^{(l)}   [Residual Connection]",
-        "• Mathematical Formulation: Injects continuous functional edge weights e_{ij} = |r_{ij}| rather than binary adjacency, preserving continuous functional coupling intensities."
+        "",
+        "• Formulation: Injects continuous functional edge weights e_{ij} = |r_{ij}| rather than binary adjacency, preserving continuous functional coupling intensities with residual connections."
     ]
-    create_card(s7, Inches(0.6), Inches(1.1), Inches(8.8), Inches(1.85), "Pillar 1: Edge-Weight Aware GCN Structural Aggregation", gcn_items)
+    create_card(s7, Inches(0.6), Inches(1.05), Inches(8.8), Inches(1.9), "Pillar 1: Edge-Weight Aware GCN Structural Aggregation", gcn_items)
+    add_math_image(s7, "assets/math/eq3_edge_gcn.png", Inches(1.0), Inches(1.48), Inches(5.2))
 
     gat_items = [
-        "• Resolving Brody et al. (2021) Static Attention Rank Collapse:",
-        "     Standard GAT (Static):  alpha_{ij} ~ a^T [Wh_i || Wh_j]   (Fixed neighbor ranking across all queries i)",
         "• Mathematical Formulation 5 — GATv2 Dynamic Multi-Head Attention with Continuous Edge Attributes:",
-        "     alpha_{ij} = Softmax_j ( a^T * LeakyReLU( W_l h_i + W_r h_j + W_e e_{ij} ) )",
-        "     h_i^{(l+1)} = SiLU ( ||_{k=1}^H sum_{j in N_i} alpha_{ij}^k * W_v^k h_j^{(l)} ) + h_i^{(l)}",
-        "• Mathematical Formulation: Placing non-linearity BEFORE the projection vector enables strictly dynamic, query-dependent attention over disease-salient functional connections."
+        "",
+        "• Multi-Head Aggregation with Residual Stream:",
+        "",
+        "• Mathematical Formulation: Placing non-linearity BEFORE projection eliminates static attention collapse, enabling strictly dynamic, query-dependent attention over disease-salient functional connections."
     ]
-    create_card(s7, Inches(0.6), Inches(3.05), Inches(8.8), Inches(2.2), "Pillar 2: GATv2 Dynamic Multi-Head Attention with Continuous Edge Attributes", gat_items)
+    create_card(s7, Inches(0.6), Inches(3.05), Inches(8.8), Inches(2.6), "Pillar 2: GATv2 Dynamic Multi-Head Attention with Continuous Edge Attributes", gat_items)
+    add_math_image(s7, "assets/math/eq5_gatv2.png", Inches(1.0), Inches(3.48), Inches(5.2))
+    add_math_image(s7, "assets/math/eq5_gatv2_update.png", Inches(1.0), Inches(4.3), Inches(5.0))
 
     pool_items = [
         "• Mathematical Formulation 6 — Dual Global Graph-Level Readout Concatenation:",
-        "     h_mean = (1 / |V|) * sum_{v in V} h_v   [Whole-brain global connectivity background in R^d]",
-        "     h_max  = max_{v in V} ( h_v )            [Focal, localized network lesion hubs in R^d]",
-        "     h_G    = [ h_mean || h_max ] in R^{2d}   [Jointly preserves whole-brain and focal biomarkers]"
+        "",
+        "• Mathematical Formulation: Preserves both whole-brain background connectivity (Mean) and focal lesion hubs (Max)."
     ]
-    create_card(s7, Inches(0.6), Inches(5.35), Inches(8.8), Inches(1.5), "Pillar 3: Dual Global Graph Pooling [Mean || Max]", pool_items)
+    create_card(s7, Inches(0.6), Inches(5.75), Inches(8.8), Inches(1.25), "Pillar 3: Dual Global Graph Pooling [Mean || Max]", pool_items)
+    add_math_image(s7, "assets/math/eq6_dual_pool.png", Inches(1.0), Inches(6.15), Inches(5.4))
 
     # =========================================================================
     # SLIDE 8: What We Will Do 2 — SwiGLU Gating & Youden Calibration
@@ -321,24 +326,24 @@ def build_iitr_deck():
 
     swiglu_items = [
         "• Mathematical Formulation 7 — Swish Gated Linear Unit (Shazeer, 2020; LLaMA 3 Architecture):",
-        "     SwiGLU(h_G) = ( Swish(h_G * W_gate + b_gate) (x) (h_G * W_up + b_up) ) * W_down + b_down",
-        "     where Swish(z) = z * sigma(beta * z) = z / (1 + e^{-beta * z})",
+        "",
         "• Classification Logits:  z = W_cls * Dropout( SwiGLU(h_G) ) in R^2,   P(y=1|G) = ( e^{z_1} ) / ( e^{z_0} + e^{z_1} )",
         "• Mathematical Formulation: Multiplicative gating branch (x) acts as a dynamic noise filter, suppressing multi-site scanner noise fluctuations while amplifying subtle functional disconnection signals."
     ]
-    create_card(s8, Inches(0.6), Inches(1.1), Inches(8.8), Inches(2.4), "A. SwiGLU Multiplicative Noise Gating in Classifier Head", swiglu_items)
+    create_card(s8, Inches(0.6), Inches(1.05), Inches(8.8), Inches(2.6), "A. SwiGLU Multiplicative Noise Gating in Classifier Head", swiglu_items)
+    add_math_image(s8, "assets/math/eq7_swiglu.png", Inches(1.0), Inches(1.65), Inches(6.0))
 
     cal_items = [
         "• Multi-Site Domain Shift Challenge: Scanner SNR variations shift predicted test probabilities, making the default arbitrary p = 0.5 decision boundary sub-optimal.",
-        "• Mathematical Formulation 8 — Youden's J-Statistic (Youden, 1950):",
-        "     J(t) = Sensitivity(t) + Specificity(t) - 1 = TruePositiveRate(t) - FalsePositiveRate(t)",
-        "• Optimal Threshold Selection (Calibrated on Validation ROC Curve):",
-        "     t^* = argmax_{t in [0, 1]}  ( TPR(t) - FPR(t) )",
-        "• Operational Inference Rule:",
-        "     y_pred = 1  if P(y=1 | G) >= t^*;  else 0",
+        "• Mathematical Formulation 8 — Youden's J-Statistic Optimization (Youden, 1950):",
+        "",
+        "• Optimal Calibration Rule on Validation ROC Curve:",
+        "",
         "• Formulated Effect: Realigns operational test accuracy directly with the model's true discriminative ROC-AUC, eliminating multi-site threshold bias."
     ]
-    create_card(s8, Inches(0.6), Inches(3.6), Inches(8.8), Inches(3.25), "B. Decision Threshold Calibration via Youden's J-Statistic", cal_items, border_color=COLOR_GREEN, title_color=COLOR_GREEN)
+    create_card(s8, Inches(0.6), Inches(3.8), Inches(8.8), Inches(3.05), "B. Decision Threshold Calibration via Youden's J-Statistic", cal_items, border_color=COLOR_GREEN, title_color=COLOR_GREEN)
+    add_math_image(s8, "assets/math/eq8_youden.png", Inches(1.0), Inches(4.7), Inches(5.2))
+    add_math_image(s8, "assets/math/eq8_youden_opt.png", Inches(1.0), Inches(5.45), Inches(5.2))
 
     # =========================================================================
     # SLIDE 9: What We Will Do 3 — Mathematical Explainability (GNNExplainer)
@@ -348,15 +353,16 @@ def build_iitr_deck():
 
     exp_items = [
         "• Goal: Identify compact explanatory subgraph G_s = (V_s, E_s) that explains disease prediction y_hat.",
-        "• Information-Theoretic Mutual Information Objective (Ying et al., NeurIPS 2019):",
-        "     max_{G_s}  MI( Y, G_s ) = H(Y) - H( Y | G = G_s )",
+        "• Information-Theoretic Mutual Information Objective (Ying et al., NeurIPS 2019):  max_{G_s} MI( Y, G_s ) = H(Y) - H( Y | G = G_s )",
         "• Mathematical Formulation 9 — Continuous Relaxation with Entropy Regularization:",
-        "     min_{M, F}  L( y_hat, f( A (*) sigma(M), X (*) sigma(F) ) ) + lambda_1 * ||M||_1 + lambda_2 * Ent(M)",
-        "     where Ent(M) = - sum_{e} ( M_e * log M_e + (1 - M_e) * log(1 - M_e) ) enforces discrete binary-like mask selections.",
-        "• Gradient Ascent Optimization: Model weights theta are frozen; gradients backpropagate strictly to masks M and F:",
-        "     M <- M - eta * nabla_M L_explainer   (Optimized over 500 gradient steps per patient on CUDA)."
+        "",
+        "• Entropy Term Enforces Crisp Binary-like Edge Masks:",
+        "",
+        "• Gradient Optimization: Model weights theta are frozen; gradients backpropagate strictly to masks: M <- M - eta * nabla_M L_explainer."
     ]
-    create_card(s9, Inches(0.6), Inches(1.1), Inches(8.8), Inches(2.95), "A. Information-Theoretic Biomarker Extraction Objective", exp_items)
+    create_card(s9, Inches(0.6), Inches(1.05), Inches(8.8), Inches(3.25), "A. Information-Theoretic Biomarker Extraction Objective", exp_items)
+    add_math_image(s9, "assets/math/eq9_gnnexplainer.png", Inches(1.0), Inches(2.2), Inches(6.0))
+    add_math_image(s9, "assets/math/eq9_entropy.png", Inches(1.0), Inches(2.95), Inches(5.6))
 
     bio_items = [
         "• Planned Consensus Neural Biomarker Targets:",
@@ -365,7 +371,7 @@ def build_iitr_deck():
         "   3. Default Mode Network (DMN) Decoupling: Cerebelum_9_R <-> Cingulum_Post_L (Posterior Cingulate hub disruption, clinical hallmark of Alzheimer's).",
         "   4. Memory-Attention Circuit: Hippocampus_L <-> SupraMarginal_R (Episodic memory to parietal attention disconnection)."
     ]
-    create_card(s9, Inches(0.6), Inches(4.15), Inches(8.8), Inches(2.7), "B. Biological Hypotheses for Discovered Neural Biomarkers", bio_items)
+    create_card(s9, Inches(0.6), Inches(4.45), Inches(8.8), Inches(2.45), "B. Biological Hypotheses for Discovered Neural Biomarkers", bio_items)
 
     # =========================================================================
     # SLIDE 10: What We Will Do 4 — Proposed Multi-Modal Extension (fMRI + DTI)
@@ -377,21 +383,20 @@ def build_iitr_deck():
         "• Motivation: Functional disconnection (fMRI) is physically constrained by white-matter axonal structural pathways (DTI). Combining functional and structural connectomes resolves false-positive correlations.",
         "• Mathematical Dual-Graph Formulation: Each subject k is modeled as a dual-relational graph G_k = (V, E_{func}, E_{struct}, X):",
         "     Functional Graph:  A_{func} in R^{|V| x |V|},   A_{func}(i, j) = |r_{ij}|  (Pearson correlation from resting-state fMRI)",
-        "     Structural Graph:  A_{struct} in R^{|V| x |V|},  A_{struct}(i, j) = FA_{ij} * log(N_{ij} + 1)  (Fractional Anisotropy & Streamline count from DTI tractography)",
-        "• Cross-Modality Attentional Fusion Operator:",
-        "     h_i^{func}   = GATv2_{func}( h_i, A_{func}, E_{func} )",
-        "     h_i^{struct} = GATv2_{struct}( h_i, A_{struct}, E_{struct} )",
-        "     h_i^{fused}  = gamma_i * h_i^{func} + (1 - gamma_i) * h_i^{struct},   where  gamma_i = sigma( W_gamma [ h_i^{func} || h_i^{struct} ] )",
+        "     Structural Graph:  A_{struct} in R^{|V| x |V|},  A_{struct}(i, j) = FA_{ij} * log(N_{ij} + 1)  (Fractional Anisotropy & Streamline count from DTI)",
+        "• Proposed Multi-Modal Gating Operator (Functional-Structural Fusion):",
+        "",
         "• Unified Graph Readout:  h_G = [ MeanPool(h^{fused}) || MaxPool(h^{fused}) ] -> SwiGLU -> Binary Classification P(y=1 | G)."
     ]
-    create_card(s10, Inches(0.6), Inches(1.1), Inches(8.8), Inches(3.2), "A. Mathematical Framework for Multi-Modal Functional-Structural Graph Fusion", mod_items)
+    create_card(s10, Inches(0.6), Inches(1.05), Inches(8.8), Inches(3.45), "A. Mathematical Framework for Multi-Modal Functional-Structural Graph Fusion", mod_items)
+    add_math_image(s10, "assets/math/ext_multimodal.png", Inches(1.0), Inches(2.9), Inches(6.0))
 
     pipe_items = [
         "• Target Datasets for Validation: ADNI (Alzheimer's Disease Neuroimaging Initiative) & PPMI (Parkinson's Progression Markers Initiative).",
         "• Rigorous Validation Protocol: 5-fold Subject-Stratified Cross-Validation across distinct clinical scanner centers.",
         "• Evaluation Criteria: Macro-F1 (primary clinical metric), ROC-AUC, Calibrated Accuracy (Youden's J), and Biomarker Subgraph Jaccard Stability."
     ]
-    create_card(s10, Inches(0.6), Inches(4.45), Inches(8.8), Inches(2.4), "B. Validation Strategy & Benchmark Roadmap", pipe_items, border_color=COLOR_GREEN, title_color=COLOR_GREEN)
+    create_card(s10, Inches(0.6), Inches(4.65), Inches(8.8), Inches(2.25), "B. Validation Strategy & Benchmark Roadmap", pipe_items, border_color=COLOR_GREEN, title_color=COLOR_GREEN)
 
     # =========================================================================
     # SLIDE 11: Summary & Roadmap
