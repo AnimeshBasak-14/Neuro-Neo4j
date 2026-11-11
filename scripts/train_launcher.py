@@ -376,6 +376,87 @@ def step_explain(cfg: dict, model, test_loader, device):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Dry run: self-contained smoke test (CPU, no database, no real data)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_smoke_test(config_path: str | None = None) -> bool:
+    """
+    Offline smoke test of the main components. Uses only in-memory synthetic
+    data, so it needs neither Neo4j, a GPU, nor the files in data/processed.
+    Returns True if every check passes.
+    """
+    import numpy as np
+    import pandas as pd
+
+    results: list[tuple[str, bool, str]] = []
+
+    def check(name, fn):
+        try:
+            detail = fn()
+            results.append((name, True, str(detail) if detail else ""))
+        except Exception as exc:  # report every failure, do not stop at the first
+            results.append((name, False, f"{type(exc).__name__}: {exc}"))
+
+    def t_config():
+        path = config_path or str(PROJECT_ROOT / "config" / "config.yaml")
+        with open(path) as f:
+            cfg = yaml.safe_load(f)
+        assert "model" in cfg and "training" in cfg, "config needs model and training sections"
+        return path
+
+    def t_synthetic_etl():
+        from data.synthetic.generate_synthetic import AAL116_REGIONS, make_connectome
+        from neo4j_layer.etl.transform import ConnectomeTransformer
+        m = make_connectome("Diseased", "site_B", seed=1)
+        assert m.shape == (116, 116)
+        tr = ConnectomeTransformer(AAL116_REGIONS)
+        w = tr.threshold(tr.normalize(tr.regress_global_signal(m)), threshold=0.3)
+        edges = tr.to_edge_list(w, "sub_test", "Diseased")
+        assert len(edges) > 1000, f"only {len(edges)} edges kept"
+        return f"{len(edges)} edges"
+
+    def t_model_forward():
+        from models.gnn.gcn_gat_model import BrainGNNModel
+        mc = {"in_channels": 5, "hidden_channels": 32, "num_classes": 2, "num_heads": 4,
+              "dropout": 0.1, "num_gcn_layers": 2, "num_gat_layers": 1}
+        model = BrainGNNModel(**mc).eval()
+        x = torch.randn(20, 5)
+        ei = torch.randint(0, 20, (2, 80))
+        ea = torch.randn(80, 1)
+        out = model(x, ei, ea, torch.zeros(20, dtype=torch.long))
+        assert out.shape == (1, 2)
+        return f"{model.count_parameters():,} params"
+
+    def t_split():
+        from validation.subject_split import subject_level_split
+        df = pd.DataFrame({"PatientID": [f"s{i}" for i in range(100)],
+                           "Diagnosis": ["Healthy", "Diseased"] * 50})
+        tr_, va_, te_ = subject_level_split(subjects_df=df, ratios=(0.7, 0.15, 0.15), random_seed=42)
+        ids = [set(d.PatientID) for d in (tr_, va_, te_)]
+        assert not (ids[0] & ids[1] or ids[0] & ids[2] or ids[1] & ids[2]), "subject leakage"
+        return f"{len(tr_)}/{len(va_)}/{len(te_)}"
+
+    def t_metrics():
+        from models.metrics import MetricsReport
+        rng = np.random.default_rng(0)
+        y = np.array([0, 1] * 20)
+        p = rng.random((40, 2)); p /= p.sum(1, keepdims=True)
+        rep = MetricsReport.from_arrays(y_true=y, y_pred=p.argmax(1), y_scores=p, split="smoke")
+        return f"AUC {rep.roc_auc:.3f}"
+
+    for name, fn in [("config loads", t_config), ("synthetic cohort + ETL", t_synthetic_etl),
+                     ("model forward pass", t_model_forward), ("patient-level split", t_split),
+                     ("metrics report", t_metrics)]:
+        check(name, fn)
+
+    ok = all(r[1] for r in results)
+    for name, passed, detail in results:
+        logger.info("%-26s %s  %s", name, "PASS" if passed else "FAIL", detail)
+    logger.info("Smoke test: %s", "ALL PASSED" if ok else "FAILURES FOUND")
+    return ok
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -402,8 +483,7 @@ def main():
     # ── Dry run shortcut ──────────────────────────────────────────────────────
     if args.dry_run:
         logger.info("Dry-run mode — running smoke tests.")
-        os.system(f'"{sys.executable}" dry_run/dry_run_all.py')
-        return
+        sys.exit(0 if run_smoke_test(args.config) else 1)
 
     # ── Config resolution ─────────────────────────────────────────────────────
     if args.config:

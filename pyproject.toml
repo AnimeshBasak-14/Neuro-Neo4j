@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Hybrid Graph Database and Explainable GNN Pipeline for Brain Biomarker Discovery"
 authors = [{name = "basakanimesh14"}]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "numpy>=1.24",
     "pandas>=2.0",
@@ -40,4 +40,8 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["models", "api", "monitoring", "validation"]
+packages = ["models", "api", "monitoring", "validation", "neo4j_layer", "data"]
+
+[tool.uv]
+# Application, not a library: install dependencies only, do not build the project itself.
+package = false
